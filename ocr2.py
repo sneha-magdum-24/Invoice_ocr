@@ -1,1649 +1,2079 @@
+# import cv2
+# import re
+# import pytesseract
+# from PIL import Image
+# import pandas as pd
+# import fitz  # PyMuPDF for PDF processing
+# import os
+
+
+
+# import requests
+# import json
+# import random
+
+# class FocusedInvoiceOCR:
+#     """
+#     Simplified OCR system that extracts only specific invoice fields:
+#     - Company name
+#     - Date
+#     - Table items (description, quantity, price)
+#     - Final total
+#     """
+   
+#     def __init__(self):
+#         pass
+    
+#     def preprocess_image(self, image_path):
+#         """Advanced image preprocessing for better OCR accuracy"""
+#         img = cv2.imread(image_path)
+#         if img is None:
+#             raise ValueError(f"Cannot read image: {image_path}")
+        
+#         # Resize image if too large
+#         height, width = img.shape[:2]
+#         if width > 2000:
+#             scale = 2000 / width
+#             new_width = int(width * scale)
+#             new_height = int(height * scale)
+#             img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+#         # Convert to grayscale
+#         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+#         # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+#         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+#         enhanced = clahe.apply(gray)
+        
+#         # Denoise the image
+#         denoised = cv2.fastNlMeansDenoising(enhanced)
+        
+#         # Apply different thresholding techniques and combine
+#         # Method 1: Adaptive threshold
+#         thresh1 = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+#                                        cv2.THRESH_BINARY, 11, 2)
+        
+#         # Method 2: Otsu's threshold
+#         _, thresh2 = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+#         # Combine both thresholding methods
+#         combined = cv2.bitwise_and(thresh1, thresh2)
+        
+#         # Morphological operations to clean up
+#         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+#         cleaned = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+        
+#         # Remove small noise
+#         kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+#         final = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel2)
+        
+#         return final
+    
+#     def extract_text(self, file_path):
+#         """Extract text from image or PDF"""
+#         file_ext = os.path.splitext(file_path)[1].lower()
+        
+#         if file_ext == '.pdf':
+#             return self.extract_text_from_pdf(file_path)
+#         else:
+#             return self.extract_text_from_image(file_path)
+    
+#     def extract_text_from_pdf(self, pdf_path):
+#         """Extract text from PDF using PyMuPDF"""
+#         doc = fitz.open(pdf_path)
+#         text = ""
+        
+#         for page_num in range(doc.page_count):
+#             page = doc.load_page(page_num)
+#             text += page.get_text()
+        
+#         doc.close()
+#         return text
+    
+#     def extract_text_from_image(self, image_path):
+#         """Extract text using EasyOCR with layout preservation"""
+#         import easyocr
+#         import numpy as np
+        
+#         # Initialize EasyOCR reader
+#         reader = easyocr.Reader(['en'])
+        
+#         try:
+#             # Read text from image (raw image for best quality)
+#             results = reader.readtext(image_path)
+            
+#             # Reconstruct text preserving layout (lines)
+#             # Filter low confidence first
+#             high_conf_results = [r for r in results if r[2] > 0.3]
+            
+#             extracted_text = self.reconstruct_lines(high_conf_results)
+            
+#             print(f"EasyOCR extracted {len(extracted_text)} characters")
+#             return extracted_text
+            
+#         except Exception as e:
+#             print(f"EasyOCR error: {e}")
+#             import traceback
+#             traceback.print_exc()
+#             return ""
+    
+#     def extract_company_name(self, text):
+#         """Extract company name with enhanced patterns"""
+#         lines = text.split('\n')
+        
+#         # Enhanced company name patterns
+#         company_patterns = [
+#             r'([A-Z][A-Za-z\s&.,]+(?:Inc|LLC|Ltd|Corp|Company|Co\.|Corporation|LTD|INC))',
+#             r'([A-Z][A-Za-z\s&.,]{5,50})',  # Capitalized text
+#             r'^\s*([A-Za-z][A-Za-z\s&.,]{10,60})\s*$',  # Long text lines
+#             r'([A-Z\s]{3,30})',  # All caps company names
+#         ]
+        
+       
+                
+#         for pattern in company_patterns:
+#             match = re.search(pattern, text)
+#             if match:
+#                 company = match.group(1).strip()
+#                 if len(company) > 3:
+#                     return company
+        
+#         # Fallback: return first substantial non-numeric line
+#         for line in lines[:10]:
+#             line = line.strip()
+#             if len(line) > 5 and not re.search(r'^\d+', line) and not any(word in line.lower() for word in ['invoice', 'bill', 'date']):
+#                 return line
+        
+#         return "Not found"
+    
+#     def extract_date(self, text):
+#         """Extract invoice date"""
+#         date_match = re.search(r'Date:\s*(\d{1,2}/\d{1,2}/\d{2,4})', text)
+#         if date_match:
+#             date_str = date_match.group(1)
+#             # Convert to ISO format
+#             parts = date_str.split('/')
+#             if len(parts) == 3:
+#                 month, day, year = parts
+#                 if len(year) == 2:
+#                     year = '20' + year
+#                 return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+#         return None
+    
+#     def extract_subtotal(self, text):
+#         """Extract subtotal amount"""
+#         subtotal_patterns = [
+#             r'(?:Subtotal|SUBTOTAL|Sub\s*Total|Sub-Total)\s*[:]?\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?:^|\n)\s*Subtotal\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)(?:^|\s)subtotal\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.\d{2})'
+#         ]
+        
+#         for pattern in subtotal_patterns:
+#             match = re.search(pattern, text, re.IGNORECASE)
+#             if match:
+#                 return match.group(1).replace(',', '')
+#         return "0"
+    
+#     def extract_tax(self, text):
+#         """Extract tax amount with enhanced patterns"""
+#         tax_patterns = [
+#             r'(?i)(?:tax|TAX|GST|VAT|Sales\s*Tax|HST)\s*[:]?\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)(?:tax|GST|VAT)\s*\([\d.%]+\)\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)sales\s*tax\s*\([\d.%]+\)\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)(?:^|\n)\s*tax\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)\b(?:tax|gst|vat)\b.*?([\d,]+\.\d{2})',
+#         ]
+        
+#         for pattern in tax_patterns:
+#             match = re.search(pattern, text)
+#             if match:
+#                 return match.group(1).replace(',', '')
+#         return "0"
+    
+#     def extract_discount(self, text):
+#         """Extract discount amount with comprehensive patterns for PDF"""
+#         # Print text for debugging
+#         print("\n=== SEARCHING FOR DISCOUNT ===")
+#         lines = text.split('\n')
+#         for i, line in enumerate(lines):
+#             if 'discount' in line.lower():
+#                 print(f"Line {i}: {line}")
+        
+#         discount_patterns = [
+#             r'(?i)discount\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)disc\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)discount\s*\([\d.%]+\)\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)discount\s*-\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+#             r'(?i)discount\s*\([\$€£₹]?([\d,]+\.?\d{0,2})\)',
+#             r'(?i)\bdiscount\b.*?([\d,]+\.\d{2})',
+#             r'(?i)\bdiscount\b.*?([\d,]+)',
+#             r'(?i)less\s*discount\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+#         ]
+        
+#         for pattern in discount_patterns:
+#             match = re.search(pattern, text)
+#             if match:
+#                 discount_value = match.group(1).replace(',', '')
+#                 print(f"Found discount: {discount_value} using pattern: {pattern}")
+#                 return discount_value
+        
+#         print("No discount found")
+#         return "0"
+    
+#     def extract_total_amount(self, text):
+#         """Extract final total amount with enhanced detection"""
+#         # Look for specific amounts in the text
+#         amounts = re.findall(r'\$([\d,]+(?:\.\d{2})?)', text)
+#         if amounts:
+#             # Convert to numbers and find the largest (likely the total)
+#             numeric_amounts = []
+#             for amount in amounts:
+#                 try:
+#                     numeric_amounts.append(float(amount.replace(',', '')))
+#                 except:
+#                     continue
+#             if numeric_amounts:
+#                 return str(max(numeric_amounts))
+#         return "0"
+    
+#     def extract_table_data(self, text):
+#         """Extract table items with enhanced detection"""
+#         lines = text.split('\n')
+#         table_data = []
+        
+#         # Based on the actual text structure, look for vehicle entries with prices
+#         vehicle_lines = []
+#         price_lines = []
+        
+#         for i, line in enumerate(lines):
+#             line = line.strip()
+#             if not line:
+#                 continue
+                
+#             # Look for vehicle descriptions
+#             if any(word in line.lower() for word in ['honda', 'chevy', 'suburban', 'crv']):
+#                 vehicle_lines.append((i, line))
+            
+#             # Look for standalone price lines
+#             if re.match(r'^\$\d+$', line):
+#                 price_lines.append((i, line.replace('$', '')))
+        
+#         # Match vehicles with their prices (prices usually come after vehicle descriptions)
+#         for v_idx, vehicle in vehicle_lines:
+#             # Find the next price after this vehicle
+#             for p_idx, price in price_lines:
+#                 if p_idx > v_idx and p_idx - v_idx <= 5:  # Price within 5 lines after vehicle
+#                     table_data.append({
+#                         'description': vehicle,
+#                         'quantity': '1',
+#                         'unit_price': price,
+#                         'amount': price
+#                     })
+#                     break
+        
+#         print(f"\nTotal items found: {len(table_data)}")
+#         return table_data
+    
+#     def parse_line_simple(self, line):
+#         """Enhanced line parsing for table data"""
+#         line = line.strip()
+#         if not line or len(line) < 3:
+#             return None
+        
+#         # Find all numbers (including decimals)
+#         numbers = re.findall(r'\d+(?:\.\d{1,2})?', line)
+#         if not numbers:
+#             return None
+        
+#         # Extract description - everything before the first number or specific patterns
+#         desc_match = re.match(r'^([A-Za-z][^\d]*?)(?=\d|$)', line)
+#         if desc_match:
+#             description = desc_match.group(1).strip()
+#         else:
+#             # Fallback: remove all numbers and clean
+#             description = line
+#             for num in numbers:
+#                 description = description.replace(num, ' ', 1)
+#             description = re.sub(r'[^\w\s-]', ' ', description).strip()
+        
+#         description = ' '.join(description.split())
+        
+#         if not description or len(description) < 2:
+#             return None
+        
+#         # Initialize result with defaults
+#         result = {
+#             'description': description,
+#             'quantity': '1',
+#             'unit_price': '0',
+#             'amount': '0'
+#         }
+        
+#         # Smart number mapping based on count and patterns
+#         if len(numbers) >= 3:
+#             # Check if first number is a reasonable quantity (1-99)
+#             first_num = int(float(numbers[0]))
+#             if first_num <= 99 and first_num >= 1:
+#                 # Likely: qty, unit_price, amount
+#                 result['quantity'] = numbers[0]
+#                 result['unit_price'] = numbers[-2]
+#                 result['amount'] = numbers[-1]
+#             else:
+#                 # First number too large to be quantity, assume qty=1
+#                 result['quantity'] = '1'
+#                 result['unit_price'] = numbers[-2]
+#                 result['amount'] = numbers[-1]
+#         elif len(numbers) == 2:
+#             # Two numbers: likely unit_price and amount (qty assumed 1)
+#             result['unit_price'] = numbers[0]
+#             result['amount'] = numbers[1]
+#         elif len(numbers) == 1:
+#             # Single number - could be amount or price
+#             result['amount'] = numbers[0]
+#             result['unit_price'] = numbers[0]
+        
+#         # Look for explicit quantity indicators (override above logic)
+#         qty_patterns = [
+#             r'(?i)(?:qty|quantity|q)\s*[:]?\s*(\d+)',
+#             r'^\s*(\d+)\s*(?:x|X|pcs|PCS|units|each)',
+#             r'(?:x|X)\s*(\d+)',
+#             r'^\s*(\d+)\s+[A-Za-z]',  # Number at start followed by text
+#         ]
+        
+#         for pattern in qty_patterns:
+#             match = re.search(pattern, line)
+#             if match:
+#                 qty_val = int(match.group(1))
+#                 if qty_val <= 99:  # Reasonable quantity
+#                     result['quantity'] = str(qty_val)
+#                     break
+        
+#         # Calculate unit price if quantity > 1
+#         try:
+#             qty = int(result['quantity'])
+#             amount = float(result['amount'])
+#             if qty > 1:
+#                 result['unit_price'] = str(round(amount / qty, 2))
+#         except (ValueError, ZeroDivisionError):
+#             pass
+        
+#         return result
+    
+#     def is_header_line(self, line_lower):
+#         """Check if a line contains table headers"""
+#         header_keywords = [
+#             'description', 'item', 'product', 'service', 'desc',
+#             'quantity', 'qty', 'qnty', 'units', 'amount',
+#             'price', 'rate', 'cost', 'total', 'value'
+#         ]
+        
+#         found_count = sum(1 for keyword in header_keywords if keyword in line_lower)
+#         return found_count >= 2
+    
+#     def map_column_positions(self, header_line):
+#         """Map column positions based on header text"""
+#         positions = {}
+#         header_lower = header_line.lower()
+        
+#         # Define header patterns and their positions
+#         header_patterns = {
+#             'description': r'(?:item|description|desc|product|service)',
+#             'quantity': r'(?:qty|quantity|qnty|units)',
+#             'unit_price': r'(?:price|rate|unit\s*price|unit\s*rate|cost)',
+#             'amount': r'(?:amount|total|subtotal|value)'
+#         }
+        
+#         for field, pattern in header_patterns.items():
+#             match = re.search(pattern, header_lower)
+#             if match:
+#                 positions[field] = match.start()
+        
+#         return positions
+    
+#     def parse_table_line_by_headers(self, line, column_positions):
+#         """Parse table line using column header positions"""
+#         line = line.strip()
+#         if not line or not column_positions:
+#             return None
+        
+#         # Extract all numbers from the line
+#         numbers = re.findall(r'\d+\.?\d{0,2}', line)
+#         if not numbers:
+#             return None
+        
+#         # Initialize result
+#         result = {
+#             'description': '',
+#             'quantity': '1',
+#             'unit_price': '0',
+#             'amount': '0'
+#         }
+        
+#         # Sort columns by position
+#         sorted_columns = sorted(column_positions.items(), key=lambda x: x[1])
+        
+#         # Extract description (text before first number or in description column area)
+#         desc_pos = column_positions.get('description', 0)
+#         desc_end = min([pos for field, pos in column_positions.items() if field != 'description' and pos > desc_pos] + [len(line)])
+        
+#         description_text = line[desc_pos:desc_end].strip()
+#         # Clean description by removing numbers
+#         for num in numbers:
+#             description_text = description_text.replace(num, ' ', 1)
+#         result['description'] = re.sub(r'[^\w\s]', ' ', description_text).strip()
+#         result['description'] = ' '.join(result['description'].split())
+        
+#         # Map numbers to columns based on positions and context
+#         if len(numbers) >= 3:
+#             # Check if first number is a reasonable quantity (1-99)
+#             first_num = int(float(numbers[0]))
+#             if first_num <= 99 and first_num >= 1:
+#                 # Standard case: quantity, unit_price, amount
+#                 result['quantity'] = numbers[0]
+#                 result['unit_price'] = numbers[-2]
+#                 result['amount'] = numbers[-1]
+#             else:
+#                 # First number too large to be quantity, assume qty=1
+#                 result['quantity'] = '1'
+#                 result['unit_price'] = numbers[-2]
+#                 result['amount'] = numbers[-1]
+#         elif len(numbers) == 2:
+#             # Two numbers: likely unit_price and amount
+#             result['unit_price'] = numbers[0]
+#             result['amount'] = numbers[1]
+#         elif len(numbers) == 1:
+#             # Single number: could be price or amount
+#             result['amount'] = numbers[0]
+#             result['unit_price'] = numbers[0]
+        
+#         # Try to find quantity in text patterns (override above logic)
+#         qty_patterns = [
+#             r'(?:quantity|qty|QTY)\s*[:]?\s*(\d+)',
+#             r'^\s*(\d+)\s*(?:x|X|pcs|PCS|units)',
+#             r'(?:x|X)\s*(\d+)',
+#             r'^\s*(\d+)\s+[A-Za-z]',  # Number at start followed by text
+#         ]
+        
+#         for pattern in qty_patterns:
+#             match = re.search(pattern, line, re.IGNORECASE)
+#             if match:
+#                 qty_val = int(match.group(1))
+#                 if qty_val <= 99:  # Reasonable quantity
+#                     result['quantity'] = str(qty_val)
+#                     break
+        
+#         # Calculate unit price if quantity > 1
+#         try:
+#             qty = int(result['quantity'])
+#             amount = float(result['amount'])
+#             if qty > 1:
+#                 result['unit_price'] = str(round(amount / qty, 2))
+#         except (ValueError, ZeroDivisionError):
+#             pass
+        
+#         return result if result['description'] else None
+    
+#     def process_with_lm_studio(self, invoice_text, table_rows=""):
+#         """Process extracted OCR text using LM Studio with gpt-oss-20b"""
+        
+#         prompt = self.extract_invoice_data_with_prompt(invoice_text, table_rows)
+        
+#         # LM Studio API endpoint (OpenAI-compatible)
+#         url = "http://localhost:1234/v1/chat/completions"
+        
+#         payload = {
+#             "model": "openai/gpt-oss-20b",
+#             "messages": [
+#                 {"role": "user", "content": prompt}
+#             ],
+#             "temperature": 0.1,
+#             "max_tokens": 2000
+#         }
+        
+#         headers = {
+#             "Content-Type": "application/json"
+#         }
+        
+#         try:
+#             response = requests.post(url, json=payload, headers=headers)
+#             response.raise_for_status()
+            
+#             result = response.json()
+#             raw_response = result['choices'][0]['message']['content']
+            
+#             # Extract JSON from response
+#             start_idx = raw_response.find('{')
+#             end_idx = raw_response.rfind('}') + 1
+            
+#             if start_idx != -1 and end_idx > start_idx:
+#                 json_str = raw_response[start_idx:end_idx]
+#                 return json.loads(json_str)
+#             else:
+#                 print("No valid JSON found in response")
+#                 print(f"Raw response: {raw_response}")
+#                 return None
+                
+#         except json.JSONDecodeError as e:
+#             print(f"JSON parsing error: {e}")
+#             print(f"Raw response: {raw_response}")
+#             return None
+            
+#         except requests.exceptions.RequestException as e:
+#             print(f"LM Studio API error: {e}")
+#             return None
+    
+#     def reconstruct_lines(self, ocr_results):
+#         """
+#         Reconstruct lines from OCR results by grouping text blocks that are vertically close.
+#         Uses dynamic threshold based on text height.
+#         """
+#         if not ocr_results:
+#             return ""
+
+#         # Calculate median text height for dynamic threshold
+#         heights = []
+#         for bbox, _, _ in ocr_results:
+#             h = bbox[2][1] - bbox[0][1]
+#             heights.append(h)
+        
+#         median_height = sorted(heights)[len(heights)//2] if heights else 20
+#         y_threshold = median_height * 0.5
+        
+#         # Sort by top-left Y coordinate
+#         sorted_results = sorted(ocr_results, key=lambda x: x[0][0][1])
+        
+#         lines = []
+#         current_line = []
+        
+#         for item in sorted_results:
+#             bbox, text, conf = item
+#             y_top = bbox[0][1]
+            
+#             if not current_line:
+#                 current_line.append(item)
+#                 continue
+                
+#             # Calculate average Y of the current line
+#             avg_y = sum(x[0][0][1] for x in current_line) / len(current_line)
+            
+#             # If the new item is within threshold of the line's average Y
+#             if abs(y_top - avg_y) < y_threshold:
+#                 current_line.append(item)
+#             else:
+#                 # Finish current line and start new one
+#                 lines.append(current_line)
+#                 current_line = [item]
+        
+#         if current_line:
+#             lines.append(current_line)
+            
+#         # Process each line: sort by X and join
+#         final_text = ""
+#         for line in lines:
+#             # Sort items in line by X coordinate
+#             line.sort(key=lambda x: x[0][0][0])
+#             # Join with tabs or logical spaces
+#             line_text = "   ".join([x[1] for x in line])
+#             final_text += line_text + "\n"
+            
+#         return final_text
+
+#     def clean_ocr_text(self, text):
+#         """Dynamic OCR text cleaning without hardcoded values"""
+#         lines = text.split('\n')
+#         cleaned_lines = []
+        
+#         # Find potential vendor name (first meaningful line)
+#         vendor_line = None
+#         for line in lines[:10]:  # Check first 10 lines
+#             line = line.strip()
+#             if len(line) > 10 and not line.isdigit() and not re.match(r'^[\d\s\-\.]+$', line):
+#                 vendor_line = line
+#                 break
+        
+#         # Extract all dollar amounts to identify outliers
+#         all_amounts = re.findall(r'\$([\d,]+\.?\d{0,2})', text)
+#         numeric_amounts = []
+#         for amount in all_amounts:
+#             try:
+#                 numeric_amounts.append(float(amount.replace(',', '')))
+#             except:
+#                 continue
+        
+#         # Calculate median to identify outliers
+#         if numeric_amounts:
+#             numeric_amounts.sort()
+#             median = numeric_amounts[len(numeric_amounts)//2]
+#             # Consider amounts > 3x median as potential OCR errors
+#             outlier_threshold = median * 3 if median > 0 else 1000
+#         else:
+#             outlier_threshold = 1000
+        
+#         for line in lines:
+#             line = line.strip()
+#             if not line:
+#                 continue
+                
+#             # Fix common OCR HTML entities
+#             line = re.sub(r'&#\d+;', '', line)
+#             line = line.replace('&gt;', '>').replace('&lt;', '<').replace('&quot;', '"')
+            
+#             # Clean up spacing around dollar signs
+#             line = re.sub(r'\s*\$\s*', '$', line)
+            
+#             keep_line = False
+            
+#             # Keep vendor line
+#             if vendor_line and line == vendor_line:
+#                 keep_line = True
+            
+#             # Keep lines with reasonable dollar amounts
+#             elif '$' in line:
+#                 amounts_in_line = re.findall(r'\$([\d,]+\.?\d{0,2})', line)
+#                 has_reasonable_amount = False
+#                 for amount in amounts_in_line:
+#                     try:
+#                         val = float(amount.replace(',', ''))
+#                         if val <= outlier_threshold:  # Not an outlier
+#                             has_reasonable_amount = True
+#                             break
+#                     except:
+#                         continue
+                
+#                 if has_reasonable_amount:
+#                     keep_line = True
+            
+#             # Keep service/item description lines
+#             elif any(keyword in line.lower() for keyword in [
+#                 'service', 'initial', 'subtotal', 'total', 'tax', 'discount'
+#             ]):
+#                 keep_line = True
+            
+#             # Keep date lines
+#             elif re.search(r'\d{1,2}/\d{1,2}/\d{4}', line):
+#                 keep_line = True
+            
+#             # Skip obviously garbled lines (too many special characters)
+#             special_char_ratio = len(re.findall(r'[^\w\s\$\.,\-]', line)) / max(len(line), 1)
+#             if special_char_ratio > 0.3:  # More than 30% special characters
+#                 keep_line = False
+            
+#             if keep_line:
+#                 # Late-stage clean up: Fix common OCR currency errors
+#                 # invalid: 82,500.00 (likely $2,500.00 if it's a huge outlier)
+#                 # pattern: 8 followed by digit, comma, digit
+                
+#                 # specific fix for "8" -> "$" at start of amounts
+#                 # Regex for "8" at start of word followed by digits and comma/dot
+#                 # e.g. 82,500.00 -> $2,500.00
+#                 # Old regex was too strict. New one handles thousands group:
+#                 # 8 followed by 1-3 digits, then a comma/dot, then more digits
+#                 line = re.sub(r'\b8(\d{1,3}[,.]\d{3}[,.]\d{2})', r'$\1', line) # Matches 82,500.00
+#                 line = re.sub(r'\b8(\d{1,3}[,.]\d{2})', r'$\1', line)          # Matches 82.50
+#                 line = re.sub(r'\b8(\d{1,3}[,.]\d{3})', r'$\1', line)          # Matches 82,000 (no cents)
+
+#                 # Fix S -> $
+#                 line = re.sub(r'\bS(\d)', r'$\1', line)
+                
+#                 cleaned_lines.append(line)
+        
+#         return '\n'.join(cleaned_lines)
+    
+#     def clean_table_headers(self, text):
+#         """Remove obvious table headers from OCR text"""
+#         lines = text.split('\n')
+#         cleaned_lines = []
+        
+#         for i, line in enumerate(lines):
+#             line = line.strip()
+#             if not line:
+#                 continue
+            
+#             # Skip lines that look like table headers
+#             # (short lines with common header words)
+#             if len(line) <= 5 and line.upper() in ['TEM', 'ITEM', 'QTY', 'COST', 'PRICE', 'DESC']:
+#                 continue
+                
+#             # Skip lines that are just column separators or formatting
+#             if all(c in '-_=|+' for c in line.replace(' ', '')):
+#                 continue
+                
+#             cleaned_lines.append(line)
+        
+#         return '\n'.join(cleaned_lines)
+    
+#     def extract_invoice_data_hybrid(self, file_path):
+#         """Two-step process: OCR extraction + Ollama processing"""
+#         print(f"Processing: {file_path}")
+        
+#         # Step 1: Extract text using OCR
+#         print("Step 1: Extracting text with OCR...")
+#         extracted_text = self.extract_text(file_path)
+        
+#         if not extracted_text or len(extracted_text.strip()) < 10:
+#             print("OCR extraction failed or insufficient text")
+#             return None
+        
+#         print(f"OCR extracted {len(extracted_text)} characters")
+        
+#         # Step 1.2: Fix common OCR artifacts (8 -> $, S -> $)
+#         # This must be done BEFORE sending to LLM
+        
+#         # Fix 8 -> $ for patterns like 82,500.00 -> $2,500.00
+#         extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3}[,.]\d{2})', r'$\1', extracted_text) 
+#         extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{2})', r'$\1', extracted_text)
+#         extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3})', r'$\1', extracted_text)
+
+#         # Fix S -> $
+#         extracted_text = re.sub(r'\bS(\d)', r'$\1', extracted_text) # S500.00 -> $500.00
+        
+#         # Step 1.5: Clean table headers
+#         cleaned_text = self.clean_table_headers(extracted_text)
+        
+#         # Debug: Show the cleaned OCR text
+#         print("\nCleaned OCR text being sent to LLM:")
+#         print("-" * 50)
+#         print(cleaned_text)
+#         print("-" * 50)
+        
+#         # Step 2: Process cleaned text with Ollama
+#         print("Step 2: Processing with Ollama...")
+#         ollama_result = self.process_with_ollama(cleaned_text)
+        
+#         if ollama_result:
+#             print("Ollama processing successful")
+#             return ollama_result
+#         else:
+#             print("Ollama processing failed")
+#             return None
+    
+    
+#     def process_with_ollama(self, invoice_text, table_rows=""):
+#         """Process invoice text using Ollama with Gemma2 2B model"""
+        
+#         # Get the extraction prompt
+#         prompt = self.extract_invoice_data_with_prompt(invoice_text, table_rows)
+        
+#         # Ollama API endpoint
+#         url = "http://localhost:11434/api/generate"
+        
+#         payload = {
+#             "model": "llama3.2:latest",
+#             "prompt": prompt,
+#             "stream": False,
+#             "options": {
+#                 "temperature": 0.1,  # Low temperature for consistent output
+#                 "top_p": 0.9,
+#                 "num_predict": 1000,
+#                 "seed": random.randint(0, 100000)  # Break cache
+#             }
+#         }
+        
+#         try:
+#             response = requests.post(url, json=payload)
+#             response.raise_for_status()
+            
+#             result = response.json()
+#             raw_response = result.get('response', '')
+            
+#             # Try to extract JSON from the response
+#             try:
+#                 # Find JSON in the response
+#                 start_idx = raw_response.find('{')
+#                 end_idx = raw_response.rfind('}') + 1
+                
+#                 if start_idx != -1:
+#                     if end_idx <= start_idx:
+#                         # If finding from right failed (likely truncated), take to end
+#                         json_str = raw_response[start_idx:]
+#                     else:
+#                         json_str = raw_response[start_idx:end_idx]
+                    
+#                     # Attempt cleanup and parsing
+#                     try:
+#                         parsed_json = json.loads(json_str)
+#                         return parsed_json
+#                     except json.JSONDecodeError:
+#                         # Smarter fix: Balance brackets
+#                         def balance_json(s):
+#                             stack = []
+#                             is_escaped = False
+#                             in_string = False
+#                             for char in s:
+#                                 if is_escaped:
+#                                     is_escaped = False
+#                                     continue
+#                                 if char == '\\':
+#                                     is_escaped = True
+#                                     continue
+#                                 if char == '"':
+#                                     in_string = not in_string
+#                                     continue
+#                                 if not in_string:
+#                                     if char == '{':
+#                                         stack.append('}')
+#                                     elif char == '[':
+#                                         stack.append(']')
+#                                     elif char == '}' or char == ']':
+#                                         if stack and stack[-1] == char:
+#                                             stack.pop()
+#                             # Append missing closing brackets in reverse order
+#                             return s + "".join(reversed(stack))
+                        
+#                         fixed_str = balance_json(json_str.strip())
+#                         try:
+#                             return json.loads(fixed_str)
+#                         except json.JSONDecodeError:
+#                             print(f"Smart JSON fix failed on: {json_str[:50]}...")
+#                             return None
+#                 else:
+#                     print("No valid JSON found in response")
+#                     print(f"Raw response: {raw_response}")
+#                     return None
+                    
+#             except json.JSONDecodeError as e:
+#                 print(f"JSON parsing error: {e}")
+#                 print(f"Raw response: {raw_response}")
+#                 return None
+                
+#         except requests.exceptions.RequestException as e:
+#             print(f"Error calling Ollama API: {e}")
+#             return None
+    
+#     def extract_invoice_data_with_prompt(self, invoice_text, table_rows=""):
+#         """Convert invoice text to exact JSON format using the extraction prompt"""
+        
+#         prompt = f"""Extract invoice data from OCR text. Read EXACT values from table columns.
+
+# {{
+#   "vendor_name": null,
+#   "date": null,
+#   "subtotal": null,
+#   "tax_amount": null,
+#   "discount_amount": null,
+#   "total": null,
+#   "items": [
+#     {{ "item_name": null, "unit_price": null, "quantity": null, "amount": null }}
+#   ]
+# }}
+
+# RULES:
+# 1. Find table with columns: Description | Quantity | Unit Price | Amount
+# 2. For each row, read values from each column exactly as shown
+# 3. Extract quantity numbers (6, 3, 2) from quantity column
+# 4. Extract unit prices from unit price column
+# 5. Extract amounts from amount column
+# 6. Remove currency symbols (€, $) from numbers
+# 7. Find "Subtotal" and "Total" lines and extract amounts
+
+# Example table row:
+# "Web design | 6 | €100.00 | €600.00"
+# Extract: item_name="Web design", quantity=6, unit_price=100.00, amount=600.00
+
+# INVOICE TEXT:
+# {invoice_text}
+# """
+        
+#         return prompt
+        
+#         return prompt
+        
+#         return prompt
+    
+#     def extract_invoice_data(self, file_path):
+#         """Main function to extract focused invoice data from image or PDF"""
+#         print(f"Processing: {file_path}")
+        
+#         # Extract text
+#         text = self.extract_text(file_path)
+        
+#         # Extract specific fields
+#         result = {
+#             'company_name': self.extract_company_name(text),
+#             'date': self.extract_date(text),
+#             'items': self.extract_table_data(text),
+#             'subtotal': self.extract_subtotal(text),
+#             'tax': self.extract_tax(text),
+#             'discount': self.extract_discount(text),
+#             'total_amount': self.extract_total_amount(text)
+#         }
+
+#         return result
+    
+#     def display_results(self, result):
+#         """Display extracted data in a clean format"""
+#         print("\n" + "="*50)
+#         print("EXTRACTED INVOICE DATA")
+#         print("="*50)
+        
+#         print(f"Company Name: {result.get('company_name', 'Not found')}")
+#         print(f"Date: {result.get('date', 'Not found')}")
+        
+#         print("\nITEMS:")
+#         print("-" * 80)
+#         items = result.get('items', [])
+        
+#         if items:
+#             print(f"{'Description':<30} {'Qty':<5} {'Unit Price':<12} {'Amount':<10}")
+#             print("-" * 80)
+#             for item in items:
+#                 desc = item['description'][:27] + "..." if len(item['description']) > 30 else item['description']
+#                 print(f"{desc:<30} {item['quantity']:<5} ${item['unit_price']:<11} ${item['amount']:<10}")
+#         else:
+#             print("No items found")
+        
+#         print("\n" + "="*50)
+#         print("FINANCIAL SUMMARY")
+#         print("="*50)
+        
+#         subtotal = result.get('subtotal', '0')
+#         total_amount = result.get('total_amount', '0')
+        
+#         # Only show subtotal if it's different from total
+#         if subtotal != total_amount and subtotal != '0':
+#             print(f"Subtotal: ${subtotal}")
+
+#         if subtotal == total_amount and subtotal !=0:
+#             print(f"Total: ${subtotal   }"   )
+        
+#         print(f"Tax: ${result.get('tax', '0')}")
+#         print(f"Discount: ${result.get('discount', '0')}")
+#         print(f"Total Amount: ${total_amount}")
+#         print("\n" + "="*50)
+
+# # Usage example
+# def main():
+#     import argparse
+#     import sys
+    
+#     parser = argparse.ArgumentParser(description='Invoice OCR Extraction')
+#     parser.add_argument('file_path', nargs='?', help='Path to invoice image or PDF')
+#     parser.add_argument('--debug', action='store_true', help='Enable debug output')
+#     args = parser.parse_args()
+    
+#     # Initialize OCR system
+#     ocr = FocusedInvoiceOCR()
+    
+#     # Determine file path
+#     if args.file_path:
+#         invoice_path = args.file_path
+#     else:
+#         # Fallback to scanning current directory for common image formats
+#         potential_files = [f for f in os.listdir('.') 
+#                           if f.lower().endswith(('.jpg', '.jpeg', '.png', '.pdf')) 
+#                           and f.lower() != "debug_layout.py"]
+        
+#         if not potential_files:
+#             print("No image/PDF files provided or found in current directory.")
+#             print("Usage: python invoice_ocr.py <path_to_invoice>")
+#             return
+            
+#         print("No file specified. Found the following potential files:")
+#         for i, f in enumerate(potential_files):
+#             print(f"{i+1}. {f}")
+        
+#         try:
+#             selection = input("\nEnter number to process (or 'q' to quit): ")
+#             if selection.lower() == 'q':
+#                 return
+#             idx = int(selection) - 1
+#             if 0 <= idx < len(potential_files):
+#                 invoice_path = potential_files[idx]
+#             else:
+#                 print("Invalid selection.")
+#                 return
+#         except ValueError:
+#             print("Invalid input.")
+#             return
+
+#     try:
+#         # Use the hybrid approach
+#         result = ocr.extract_invoice_data_hybrid(invoice_path)
+        
+#         if result:
+#             print("\nHybrid Extraction Result:")
+#             print("=" * 50)
+#             print(json.dumps(result, indent=2))
+#             print("=" * 50)
+            
+#             # Save result
+#             output_name = f"{os.path.splitext(os.path.basename(invoice_path))[0]}_data.json"
+#             with open(output_name, 'w') as f:
+#                 json.dump(result, f, indent=2)
+#             print(f"\nResult saved to '{output_name}'")
+#             return result
+#         else:
+#             print("Failed to process invoice")
+#             return None
+        
+#     except Exception as e:
+#         print(f"Error: {e}")
+#         import traceback
+#         traceback.print_exc()
+
+# if __name__ == "__main__":
+#     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import cv2
-import numpy as np
-from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
-import json
 import re
+import pytesseract
+from PIL import Image
+import pandas as pd
+import fitz  # PyMuPDF for PDF processing
+import os
+
+
+
 import requests
+import json
+import random
 
-@dataclass
-class TextBox:
-    text: str
-    bbox: Tuple[int, int, int, int]  # x, y, width, height
-    confidence: float
-    page: int = 0
-
-@dataclass
-class LayoutBlock:
-    block_type: str  # 'table', 'text', 'header', 'footer', 'figure'
-    bbox: Tuple[int, int, int, int]
-    text_boxes: List[TextBox]
-    confidence: float
-
-class UniversalLayoutPipeline:
-    """Universal OCR layout understanding pipeline"""
-    
+class FocusedInvoiceOCR:
+    """
+    Simplified OCR system that extracts only specific invoice fields:
+    - Company name
+    - Date
+    - Table items (description, quantity, price)
+    - Final total
+    """
+   
     def __init__(self):
-        self.ocr_engine = None
-        self.layout_model = None
+        pass
     
-    def extract_text_with_coordinates(self, image_path: str) -> List[TextBox]:
-        """Step 1: Get text + coordinates using multi-try OCR"""
-        attempts = [
-            ('original', lambda img: img),
-            ('contrast', self._enhance_contrast),
-            ('threshold', self._adaptive_threshold),
-            ('upscale', self._upscale_2x)
+    def preprocess_image(self, image_path):
+        """Advanced image preprocessing for better OCR accuracy"""
+        img = cv2.imread(image_path)
+        if img is None:
+            raise ValueError(f"Cannot read image: {image_path}")
+        
+        # Resize image if too large
+        height, width = img.shape[:2]
+        if width > 2000:
+            scale = 2000 / width
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        
+        # Denoise the image
+        denoised = cv2.fastNlMeansDenoising(enhanced)
+        
+        # Apply different thresholding techniques and combine
+        # Method 1: Adaptive threshold
+        thresh1 = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                       cv2.THRESH_BINARY, 11, 2)
+        
+        # Method 2: Otsu's threshold
+        _, thresh2 = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Combine both thresholding methods
+        combined = cv2.bitwise_and(thresh1, thresh2)
+        
+        # Morphological operations to clean up
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+        cleaned = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+        
+        # Remove small noise
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        final = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel2)
+        
+        return final
+    
+    def extract_text(self, file_path):
+        """Extract text from image or PDF"""
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        if file_ext == '.pdf':
+            return self.extract_text_from_pdf(file_path)
+        else:
+            return self.extract_text_from_image(file_path)
+    
+    def extract_text_from_pdf(self, pdf_path):
+        """Extract text from PDF using PyMuPDF"""
+        doc = fitz.open(pdf_path)
+        text = ""
+        
+        for page_num in range(doc.page_count):
+            page = doc.load_page(page_num)
+            text += page.get_text()
+        
+        doc.close()
+        return text
+    
+    def extract_text_from_image(self, image_path):
+        """Extract text using EasyOCR with layout preservation"""
+        import easyocr
+        import numpy as np
+        
+        # Initialize EasyOCR reader
+        reader = easyocr.Reader(['en'])
+        
+        try:
+            # Read text from image (raw image for best quality)
+            results = reader.readtext(image_path)
+            
+            # Reconstruct text preserving layout (lines)
+            # Filter low confidence first
+            high_conf_results = [r for r in results if r[2] > 0.3]
+            
+            extracted_text = self.reconstruct_lines(high_conf_results)
+            
+            print(f"EasyOCR extracted {len(extracted_text)} characters")
+            return extracted_text
+            
+        except Exception as e:
+            print(f"EasyOCR error: {e}")
+            import traceback
+            traceback.print_exc()
+            return ""
+    
+    def extract_company_name(self, text):
+        """Extract company name with enhanced patterns"""
+        lines = text.split('\n')
+        
+        # Enhanced company name patterns
+        company_patterns = [
+            r'([A-Z][A-Za-z\s&.,]+(?:Inc|LLC|Ltd|Corp|Company|Co\.|Corporation|LTD|INC))',
+            r'([A-Z][A-Za-z\s&.,]{5,50})',  # Capitalized text
+            r'^\s*([A-Za-z][A-Za-z\s&.,]{10,60})\s*$',  # Long text lines
+            r'([A-Z\s]{3,30})',  # All caps company names
         ]
         
-        best_result = []
-        best_score = 0
-        
-        for name, preprocess_func in attempts:
-            try:
-                result = self._try_ocr_with_preprocessing(image_path, preprocess_func)
-                score = self._score_ocr_result(result)
-                print(f"  {name}: {len(result)} boxes, score: {score:.2f}")
+       
                 
-                if score > best_score:
-                    best_score = score
-                    best_result = result
-            except Exception as e:
-                print(f"  {name}: failed - {e}")
+        for pattern in company_patterns:
+            match = re.search(pattern, text)
+            if match:
+                company = match.group(1).strip()
+                if len(company) > 3:
+                    return company
         
-        return best_result if best_result else self._extract_with_paddleocr(image_path)
+        # Fallback: return first substantial non-numeric line
+        for line in lines[:10]:
+            line = line.strip()
+            if len(line) > 5 and not re.search(r'^\d+', line) and not any(word in line.lower() for word in ['invoice', 'bill', 'date']):
+                return line
+        
+        return "Not found"
     
-    def _extract_with_paddleocr(self, image_path: str) -> List[TextBox]:
-        """Extract using PaddleOCR with coordinates"""
-        from paddleocr import PaddleOCR
-        
-        ocr = PaddleOCR(use_angle_cls=True, lang='en')
-        result = ocr.ocr(image_path, cls=True)
-        
-        text_boxes = []
-        for line in result[0]:
-            bbox_points = line[0]
-            text = line[1][0]
-            confidence = line[1][1]
-            
-            # Convert bbox points to x,y,w,h
-            x = min(point[0] for point in bbox_points)
-            y = min(point[1] for point in bbox_points)
-            w = max(point[0] for point in bbox_points) - x
-            h = max(point[1] for point in bbox_points) - y
-            
-            text_boxes.append(TextBox(text, (int(x), int(y), int(w), int(h)), confidence))
-        
-        return text_boxes
+    def extract_date(self, text):
+        """Extract invoice date"""
+        date_match = re.search(r'Date:\s*(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        if date_match:
+            date_str = date_match.group(1)
+            # Convert to ISO format
+            parts = date_str.split('/')
+            if len(parts) == 3:
+                month, day, year = parts
+                if len(year) == 2:
+                    year = '20' + year
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        return None
     
-    def _extract_with_easyocr(self, image_path: str) -> List[TextBox]:
-        """Extract using EasyOCR with coordinates"""
-        import easyocr
+    def extract_subtotal(self, text):
+        """Extract subtotal amount"""
+        subtotal_patterns = [
+            r'(?:Subtotal|SUBTOTAL|Sub\s*Total|Sub-Total)\s*[:]?\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?:^|\n)\s*Subtotal\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)(?:^|\s)subtotal\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.\d{2})'
+        ]
         
-        reader = easyocr.Reader(['en'])
-        results = reader.readtext(image_path)
-        
-        text_boxes = []
-        for bbox_points, text, confidence in results:
-            # Convert bbox points to x,y,w,h
-            x = min(point[0] for point in bbox_points)
-            y = min(point[1] for point in bbox_points)
-            w = max(point[0] for point in bbox_points) - x
-            h = max(point[1] for point in bbox_points) - y
-            
-            text_boxes.append(TextBox(text, (int(x), int(y), int(w), int(h)), confidence))
-        
-        return text_boxes
+        for pattern in subtotal_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).replace(',', '')
+        return "0"
     
-    def _extract_with_tesseract(self, image_path: str) -> List[TextBox]:
-        """Extract using Tesseract with coordinates"""
-        import pytesseract
-        from PIL import Image
+    def extract_tax(self, text):
+        """Extract tax amount with enhanced patterns"""
+        tax_patterns = [
+            r'(?i)(?:tax|TAX|GST|VAT|Sales\s*Tax|HST)\s*[:]?\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)(?:tax|GST|VAT)\s*\([\d.%]+\)\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)sales\s*tax\s*\([\d.%]+\)\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)(?:^|\n)\s*tax\s*[\$€£]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)\b(?:tax|gst|vat)\b.*?([\d,]+\.\d{2})',
+        ]
         
-        img = Image.open(image_path)
-        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-        
-        text_boxes = []
-        for i in range(len(data['text'])):
-            if int(data['conf'][i]) > 30:  # Filter low confidence
-                text = data['text'][i].strip()
-                if text:
-                    x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-                    confidence = int(data['conf'][i]) / 100.0
-                    text_boxes.append(TextBox(text, (x, y, w, h), confidence))
-        
-        return text_boxes
+        for pattern in tax_patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).replace(',', '')
+        return "0"
     
-    def detect_layout_blocks(self, text_boxes: List[TextBox], image_shape: Tuple[int, int]) -> List[LayoutBlock]:
-        """Step 2: Detect layout blocks using geometric analysis"""
-        height, width = image_shape
+    def extract_discount(self, text):
+        """Extract discount amount with comprehensive patterns for PDF"""
+        # Print text for debugging
+        print("\n=== SEARCHING FOR DISCOUNT ===")
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if 'discount' in line.lower():
+                print(f"Line {i}: {line}")
         
-        # Group text boxes by vertical proximity (rows)
-        rows = self._group_into_rows(text_boxes)
+        discount_patterns = [
+            r'(?i)discount\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)disc\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)discount\s*\([\d.%]+\)\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)discount\s*-\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+            r'(?i)discount\s*\([\$€£₹]?([\d,]+\.?\d{0,2})\)',
+            r'(?i)\bdiscount\b.*?([\d,]+\.\d{2})',
+            r'(?i)\bdiscount\b.*?([\d,]+)',
+            r'(?i)less\s*discount\s*[:]?\s*[\$€£₹]?\s*([\d,]+\.?\d{0,2})',
+        ]
         
-        # Detect different block types
-        blocks = []
+        for pattern in discount_patterns:
+            match = re.search(pattern, text)
+            if match:
+                discount_value = match.group(1).replace(',', '')
+                print(f"Found discount: {discount_value} using pattern: {pattern}")
+                return discount_value
         
-        # Detect header (top 15% of page)
-        header_boxes = [box for box in text_boxes if box.bbox[1] < height * 0.15]
-        if header_boxes:
-            header_bbox = self._get_bounding_box(header_boxes)
-            blocks.append(LayoutBlock('header', header_bbox, header_boxes, 0.9))
-        
-        # Detect footer (bottom 15% of page)
-        footer_boxes = [box for box in text_boxes if box.bbox[1] > height * 0.85]
-        if footer_boxes:
-            footer_bbox = self._get_bounding_box(footer_boxes)
-            blocks.append(LayoutBlock('footer', footer_bbox, footer_boxes, 0.9))
-        
-        # Detect tables (aligned columns with numeric data)
-        table_blocks = self._detect_tables(rows, width)
-        blocks.extend(table_blocks)
-        
-        # Detect multi-column text
-        column_blocks = self._detect_columns(rows, width)
-        blocks.extend(column_blocks)
-        
-        # Remaining text as paragraphs
-        used_boxes = set()
-        for block in blocks:
-            used_boxes.update(id(box) for box in block.text_boxes)
-        
-        remaining_boxes = [box for box in text_boxes if id(box) not in used_boxes]
-        if remaining_boxes:
-            text_bbox = self._get_bounding_box(remaining_boxes)
-            blocks.append(LayoutBlock('text', text_bbox, remaining_boxes, 0.7))
-        
-        return blocks
+        print("No discount found")
+        return "0"
     
-    def _group_into_rows(self, text_boxes: List[TextBox]) -> List[List[TextBox]]:
-        """Group text boxes into rows based on Y coordinate"""
-        if not text_boxes:
-            return []
-        
-        # Sort by Y coordinate
-        sorted_boxes = sorted(text_boxes, key=lambda box: box.bbox[1])
-        
-        rows = []
-        current_row = [sorted_boxes[0]]
-        
-        for box in sorted_boxes[1:]:
-            # If Y coordinate is close to current row, add to row
-            avg_y = sum(b.bbox[1] for b in current_row) / len(current_row)
-            if abs(box.bbox[1] - avg_y) < 20:  # 20px threshold
-                current_row.append(box)
-            else:
-                # Start new row
-                rows.append(current_row)
-                current_row = [box]
-        
-        if current_row:
-            rows.append(current_row)
-        
-        # Sort each row by X coordinate
-        for row in rows:
-            row.sort(key=lambda box: box.bbox[0])
-        
-        return rows
+    def extract_total_amount(self, text):
+        """Extract final total amount with enhanced detection"""
+        # Look for specific amounts in the text
+        amounts = re.findall(r'\$([\d,]+(?:\.\d{2})?)', text)
+        if amounts:
+            # Convert to numbers and find the largest (likely the total)
+            numeric_amounts = []
+            for amount in amounts:
+                try:
+                    numeric_amounts.append(float(amount.replace(',', '')))
+                except:
+                    continue
+            if numeric_amounts:
+                return str(max(numeric_amounts))
+        return "0"
     
-    def _detect_tables(self, rows: List[List[TextBox]], page_width: int) -> List[LayoutBlock]:
-        """Detect table structures"""
-        tables = []
+    def extract_table_data(self, text):
+        """Extract table items with enhanced detection"""
+        lines = text.split('\n')
+        table_data = []
         
-        # Look for rows with consistent patterns (date + description + amount)
-        table_rows = []
+        # Based on the actual text structure, look for vehicle entries with prices
+        vehicle_lines = []
+        price_lines = []
         
-        for i, row in enumerate(rows):
-            if len(row) < 2:  # Need at least 2 columns
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
                 continue
-            
-            # Check if this looks like a table row
-            has_date = any(re.search(r'\d{1,2}/\d{1,2}/\d{4}', box.text) for box in row)
-            has_currency = any('$' in box.text for box in row)
-            has_numbers = any(re.search(r'\d+', box.text) for box in row)
-            
-            # Service invoice pattern: date + vehicle + service + amount
-            if has_date and has_currency:
-                table_rows.append(row)
-            # Or numeric data with currency
-            elif has_currency and has_numbers and len(row) >= 2:
-                table_rows.append(row)
-        
-        if len(table_rows) >= 2:  # At least 2 rows for a table
-            all_boxes = [box for row in table_rows for box in row]
-            table_bbox = self._get_bounding_box(all_boxes)
-            tables.append(LayoutBlock('table', table_bbox, all_boxes, 0.9))
-        
-        return tables
-    
-    def _detect_columns(self, rows: List[List[TextBox]], page_width: int) -> List[LayoutBlock]:
-        """Detect multi-column text layout"""
-        columns = []
-        
-        # Simple column detection: look for consistent X positions
-        x_positions = []
-        for row in rows:
-            for box in row:
-                x_positions.append(box.bbox[0])
-        
-        # Find common X positions (column starts)
-        x_positions.sort()
-        column_starts = []
-        
-        if x_positions:
-            current_x = x_positions[0]
-            column_starts.append(current_x)
-            
-            for x in x_positions:
-                if x - current_x > page_width * 0.3:  # 30% of page width
-                    column_starts.append(x)
-                    current_x = x
-        
-        if len(column_starts) > 1:
-            # Group boxes by column
-            for i, start_x in enumerate(column_starts):
-                end_x = column_starts[i+1] if i+1 < len(column_starts) else page_width
                 
-                column_boxes = []
-                for box in [box for row in rows for box in row]:
-                    if start_x <= box.bbox[0] < end_x:
-                        column_boxes.append(box)
-                
-                if column_boxes:
-                    column_bbox = self._get_bounding_box(column_boxes)
-                    columns.append(LayoutBlock('column', column_bbox, column_boxes, 0.7))
-        
-        return columns
-    
-    def _check_column_alignment(self, row: List[TextBox], context_rows: List[List[TextBox]]) -> bool:
-        """Check if row is aligned with context rows (table structure)"""
-        if not context_rows:
-            return False
-        
-        # Get X positions of current row
-        current_x = [box.bbox[0] for box in row]
-        
-        # Check alignment with context rows
-        for context_row in context_rows:
-            if len(context_row) != len(row):
-                continue
+            # Look for vehicle descriptions
+            if any(word in line.lower() for word in ['honda', 'chevy', 'suburban', 'crv']):
+                vehicle_lines.append((i, line))
             
-            context_x = [box.bbox[0] for box in context_row]
-            
-            # Check if X positions are similar (within 30px)
-            aligned = all(abs(x1 - x2) < 30 for x1, x2 in zip(current_x, context_x))
-            if aligned:
-                return True
+            # Look for standalone price lines
+            if re.match(r'^\$\d+$', line):
+                price_lines.append((i, line.replace('$', '')))
         
-        return False
+        # Match vehicles with their prices (prices usually come after vehicle descriptions)
+        for v_idx, vehicle in vehicle_lines:
+            # Find the next price after this vehicle
+            for p_idx, price in price_lines:
+                if p_idx > v_idx and p_idx - v_idx <= 5:  # Price within 5 lines after vehicle
+                    table_data.append({
+                        'description': vehicle,
+                        'quantity': '1',
+                        'unit_price': price,
+                        'amount': price
+                    })
+                    break
+        
+        print(f"\nTotal items found: {len(table_data)}")
+        return table_data
     
-    def _get_bounding_box(self, boxes: List[TextBox]) -> Tuple[int, int, int, int]:
-        """Get bounding box that contains all text boxes"""
-        if not boxes:
-            return (0, 0, 0, 0)
+    def parse_line_simple(self, line):
+        """Enhanced line parsing for table data"""
+        line = line.strip()
+        if not line or len(line) < 3:
+            return None
         
-        min_x = min(box.bbox[0] for box in boxes)
-        min_y = min(box.bbox[1] for box in boxes)
-        max_x = max(box.bbox[0] + box.bbox[2] for box in boxes)
-        max_y = max(box.bbox[1] + box.bbox[3] for box in boxes)
+        # Find all numbers (including decimals)
+        numbers = re.findall(r'\d+(?:\.\d{1,2})?', line)
+        if not numbers:
+            return None
         
-        return (min_x, min_y, max_x - min_x, max_y - min_y)
-    
-    def process_blocks(self, blocks: List[LayoutBlock]) -> Dict[str, Any]:
-        """Step 3: Handle each block type differently"""
+        # Extract description - everything before the first number or specific patterns
+        desc_match = re.match(r'^([A-Za-z][^\d]*?)(?=\d|$)', line)
+        if desc_match:
+            description = desc_match.group(1).strip()
+        else:
+            # Fallback: remove all numbers and clean
+            description = line
+            for num in numbers:
+                description = description.replace(num, ' ', 1)
+            description = re.sub(r'[^\w\s-]', ' ', description).strip()
+        
+        description = ' '.join(description.split())
+        
+        if not description or len(description) < 2:
+            return None
+        
+        # Initialize result with defaults
         result = {
-            'header': [],
-            'footer': [],
-            'tables': [],
-            'text': [],
-            'columns': []
+            'description': description,
+            'quantity': '1',
+            'unit_price': '0',
+            'amount': '0'
         }
         
-        for block in blocks:
-            if block.block_type == 'table':
-                table_data = self._process_table_block(block)
-                result['tables'].append(table_data)
-            
-            elif block.block_type == 'column':
-                column_text = self._process_column_block(block)
-                result['columns'].append(column_text)
-            
-            elif block.block_type == 'header':
-                header_text = self._process_text_block(block)
-                result['header'].append(header_text)
-            
-            elif block.block_type == 'footer':
-                footer_text = self._process_text_block(block)
-                result['footer'].append(footer_text)
-            
-            else:  # text block
-                text_content = self._process_text_block(block)
-                result['text'].append(text_content)
+        # Smart number mapping based on count and patterns
+        if len(numbers) >= 3:
+            # Likely: qty, unit_price, amount
+            result['quantity'] = numbers[0]
+            result['unit_price'] = numbers[-2]
+            result['amount'] = numbers[-1]
+        elif len(numbers) == 2:
+            # Likely: unit_price, amount (qty assumed 1)
+            result['unit_price'] = numbers[0]
+            result['amount'] = numbers[1]
+        elif len(numbers) == 1:
+            # Single number - could be amount or price
+            result['amount'] = numbers[0]
+            result['unit_price'] = numbers[0]
+        
+        # Look for explicit quantity indicators
+        qty_patterns = [
+            r'(?i)(?:qty|quantity|q)\s*[:]?\s*(\d+)',
+            r'(\d+)\s*(?:x|X|pcs|PCS|units|each)',
+            r'(?:x|X)\s*(\d+)'
+        ]
+        
+        for pattern in qty_patterns:
+            match = re.search(pattern, line)
+            if match:
+                result['quantity'] = match.group(1)
+                break
         
         return result
     
-    def _process_table_block(self, block: LayoutBlock) -> Dict[str, Any]:
-        """Process table block - extract rows and columns"""
-        # Group boxes into rows
-        rows = self._group_into_rows(block.text_boxes)
+    def is_header_line(self, line_lower):
+        """Check if a line contains table headers"""
+        header_keywords = [
+            'description', 'item', 'product', 'service', 'desc',
+            'quantity', 'qty', 'qnty', 'units', 'amount',
+            'price', 'rate', 'cost', 'total', 'value'
+        ]
         
-        table_data = {
-            'type': 'table',
-            'rows': [],
-            'bbox': block.bbox
+        found_count = sum(1 for keyword in header_keywords if keyword in line_lower)
+        return found_count >= 2
+    
+    def map_column_positions(self, header_line):
+        """Map column positions based on header text"""
+        positions = {}
+        header_lower = header_line.lower()
+        
+        # Define header patterns and their positions
+        header_patterns = {
+            'description': r'(?:item|description|desc|product|service)',
+            'quantity': r'(?:qty|quantity|qnty|units)',
+            'unit_price': r'(?:price|rate|unit\s*price|unit\s*rate|cost)',
+            'amount': r'(?:amount|total|subtotal|value)'
         }
         
-        for row_boxes in rows:
-            row_data = []
-            for box in row_boxes:
-                row_data.append({
-                    'text': box.text,
-                    'bbox': box.bbox,
-                    'confidence': box.confidence
-                })
-            table_data['rows'].append(row_data)
+        for field, pattern in header_patterns.items():
+            match = re.search(pattern, header_lower)
+            if match:
+                positions[field] = match.start()
         
-        return table_data
+        return positions
     
-    def _process_column_block(self, block: LayoutBlock) -> Dict[str, Any]:
-        """Process column block - read in correct order"""
-        # Sort by Y coordinate for proper reading order
-        sorted_boxes = sorted(block.text_boxes, key=lambda box: box.bbox[1])
+    def parse_table_line_by_headers(self, line, column_positions):
+        """Parse table line using column header positions"""
+        line = line.strip()
+        if not line or not column_positions:
+            return None
         
-        return {
-            'type': 'column',
-            'text': ' '.join(box.text for box in sorted_boxes),
-            'bbox': block.bbox,
-            'word_count': len(sorted_boxes)
-        }
-    
-    def _process_text_block(self, block: LayoutBlock) -> Dict[str, Any]:
-        """Process regular text block"""
-        # Sort by reading order (top to bottom, left to right)
-        rows = self._group_into_rows(block.text_boxes)
+        # Extract all numbers from the line
+        numbers = re.findall(r'\d+\.?\d{0,2}', line)
+        if not numbers:
+            return None
         
-        text_parts = []
-        for row in rows:
-            row_text = ' '.join(box.text for box in row)
-            text_parts.append(row_text)
-        
-        return {
-            'type': 'text',
-            'text': '\n'.join(text_parts),
-            'bbox': block.bbox,
-            'confidence': block.confidence
-        }
-    
-    def convert_to_business_json(self, processed_blocks: Dict[str, Any], schema_type: str = 'invoice') -> Dict[str, Any]:
-        """Step 4: Convert to business JSON using schema"""
-        if schema_type == 'invoice':
-            return self._convert_to_invoice_schema(processed_blocks)
-        elif schema_type == 'receipt':
-            return self._convert_to_receipt_schema(processed_blocks)
-        else:
-            return processed_blocks  # Return raw structure
-    
-    def _convert_to_invoice_schema(self, blocks: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert to invoice schema"""
-        invoice = {
-            'vendor_name': None,
-            'date': None,
-            'invoice_number': None,
-            'items': [],
-            'subtotal': None,
-            'tax': None,
-            'total': None
+        # Initialize result
+        result = {
+            'description': '',
+            'quantity': '1',
+            'unit_price': '0',
+            'amount': '0'
         }
         
-        # Build all_text first
-        all_text = ' '.join([
-            ' '.join(item.get('text', '') for item in blocks.get('header', [])),
-            ' '.join(item.get('text', '') for item in blocks.get('text', [])),
-            ' '.join(item.get('text', '') for item in blocks.get('footer', [])),
-            ' '.join(item.get('text', '') for item in blocks.get('columns', []))
-        ])
+        # Sort columns by position
+        sorted_columns = sorted(column_positions.items(), key=lambda x: x[1])
         
-        # Also include text from table blocks
-        for table in blocks.get('tables', []):
-            for row in table.get('rows', []):
-                for cell in row:
-                    all_text += ' ' + cell.get('text', '')
+        # Extract description (text before first number or in description column area)
+        desc_pos = column_positions.get('description', 0)
+        desc_end = min([pos for field, pos in column_positions.items() if field != 'description' and pos > desc_pos] + [len(line)])
         
-        # Extract vendor from header with scoring - use individual lines
-        vendor_candidates = []
-        if blocks.get('header'):
-            header_lines = blocks['header'][0]['text'].split('\n')
-            for line in header_lines[:3]:  # Only first 3 lines
-                line = line.strip()
-                if len(line) > 3:
-                    vendor_candidates.append(line)
+        description_text = line[desc_pos:desc_end].strip()
+        # Clean description by removing numbers
+        for num in numbers:
+            description_text = description_text.replace(num, ' ', 1)
+        result['description'] = re.sub(r'[^\w\s]', ' ', description_text).strip()
+        result['description'] = ' '.join(result['description'].split())
         
-        # Score each candidate individually
-        best_vendor = None
-        best_score = 0
-        for candidate in vendor_candidates:
-            score = self._score_vendor_candidate(candidate)
-            if score > best_score:
-                best_score = score
-                best_vendor = candidate
+        # Map numbers to columns based on positions and context
+        if len(numbers) >= 3:
+            # Standard case: quantity, unit_price, amount
+            result['quantity'] = numbers[0]
+            result['unit_price'] = numbers[-2]
+            result['amount'] = numbers[-1]
+        elif len(numbers) == 2:
+            # Two numbers: likely unit_price and amount
+            result['unit_price'] = numbers[0]
+            result['amount'] = numbers[1]
+        elif len(numbers) == 1:
+            # Single number: could be price or amount
+            result['amount'] = numbers[0]
+            result['unit_price'] = numbers[0]
         
-        invoice['vendor_name'] = best_vendor
+        # Try to find quantity in text patterns
+        qty_patterns = [
+            r'(?:quantity|qty|QTY)\s*[:]?\s*(\d+)',
+            r'(\d+)\s*(?:x|X|pcs|PCS|units)',
+            r'(?:x|X)\s*(\d+)'
+        ]
         
-        # Extract date patterns
-        date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', all_text)
-        if date_match:
-            invoice['date'] = date_match.group()
+        for pattern in qty_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                result['quantity'] = match.group(1)
+                break
         
-        # Process tables for items - if no table detected, look in columns
-        for table in blocks.get('tables', []):
-            items = self._extract_items_from_table(table)
-            invoice['items'].extend(items)
-        
-        # If no items from tables, try amount-column clustering
-        if not invoice['items']:
-            invoice['items'] = self._extract_items_by_amount_column(all_text, self._current_text_boxes)
-        
-        # If still no items, try fallback line-item finder
-        if not invoice['items']:
-            invoice['items'] = self._find_line_items_fallback(all_text)
-        
-        # Extract totals
-        totals = self._extract_financial_totals(all_text)
-        invoice.update(totals)
-        
-        return invoice
+        return result if result['description'] else None
     
-    def _extract_items_from_table(self, table: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract items from table structure"""
-        items = []
+    def process_with_lm_studio(self, invoice_text, table_rows=""):
+        """Process extracted OCR text using LM Studio with gpt-oss-20b"""
         
-        # Group text boxes by Y coordinate (rows)
-        text_boxes = []
-        for row in table['rows']:
-            for cell in row:
-                text_boxes.append(cell)
+        prompt = self.extract_invoice_data_with_prompt(invoice_text, table_rows)
         
-        # Sort by Y coordinate to get proper rows
-        text_boxes.sort(key=lambda x: x['bbox'][1])
+        # LM Studio API endpoint (OpenAI-compatible)
+        url = "http://localhost:1234/v1/chat/completions"
         
-        # Group into rows by Y proximity
-        rows = []
-        current_row = []
+        payload = {
+            "model": "openai/gpt-oss-20b",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2000
+        }
         
-        for box in text_boxes:
-            if not current_row:
-                current_row.append(box)
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            raw_response = result['choices'][0]['message']['content']
+            
+            # Extract JSON from response
+            start_idx = raw_response.find('{')
+            end_idx = raw_response.rfind('}') + 1
+            
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = raw_response[start_idx:end_idx]
+                return json.loads(json_str)
             else:
-                # If Y coordinate is close to current row, add to row
-                avg_y = sum(b['bbox'][1] for b in current_row) / len(current_row)
-                if abs(box['bbox'][1] - avg_y) < 30:  # 30px threshold
-                    current_row.append(box)
-                else:
-                    # Sort current row by X coordinate and add to rows
-                    current_row.sort(key=lambda x: x['bbox'][0])
-                    rows.append(current_row)
-                    current_row = [box]
+                print("No valid JSON found in response")
+                print(f"Raw response: {raw_response}")
+                return None
+                
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            print(f"Raw response: {raw_response}")
+            return None
+            
+        except requests.exceptions.RequestException as e:
+            print(f"LM Studio API error: {e}")
+            return None
+    
+    def reconstruct_lines(self, ocr_results):
+        """
+        Reconstruct lines from OCR results by grouping text blocks that are vertically close.
+        Uses dynamic threshold based on text height.
+        """
+        if not ocr_results:
+            return ""
+
+        # Calculate median text height for dynamic threshold
+        heights = []
+        for bbox, _, _ in ocr_results:
+            h = bbox[2][1] - bbox[0][1]
+            heights.append(h)
         
-        if current_row:
-            current_row.sort(key=lambda x: x['bbox'][0])
-            rows.append(current_row)
+        median_height = sorted(heights)[len(heights)//2] if heights else 20
+        y_threshold = median_height * 0.5
         
-        # Extract items from rows
-        for row in rows:
-            if len(row) < 2:
+        # Sort by top-left Y coordinate
+        sorted_results = sorted(ocr_results, key=lambda x: x[0][0][1])
+        
+        lines = []
+        current_line = []
+        
+        for item in sorted_results:
+            bbox, text, conf = item
+            y_top = bbox[0][1]
+            
+            if not current_line:
+                current_line.append(item)
                 continue
-            
-            # Look for date pattern
-            date_text = None
-            vehicle_text = ""
-            service_text = ""
-            amount_text = None
-            
-            for box in row:
-                text = box['text']
                 
-                # Check for date
-                if re.search(r'\d{1,2}/\d{1,2}/\d{4}', text):
-                    date_text = text
-                # Check for currency
-                elif '$' in text:
-                    amount_text = text.replace('$', '')
-                # Vehicle or service description
-                else:
-                    if any(word in text.lower() for word in ['chevy', 'honda', 'ford', 'toyota', 'blue', 'white', 'black']):
-                        vehicle_text += text + " "
-                    elif any(word in text.lower() for word in ['interior', 'exterior', 'engine', 'bay', 'service']):
-                        service_text += text + " "
-                    else:
-                        vehicle_text += text + " "
+            # Calculate average Y of the current line
+            avg_y = sum(x[0][0][1] for x in current_line) / len(current_line)
             
-            # Create item if we have essential data
-            if amount_text:
-                description = (vehicle_text + service_text).strip()
-                if not description:
-                    description = "Service"
-                
-                items.append({
-                    'description': description,
-                    'amount': amount_text,
-                    'quantity': '1',
-                    'unit_price': amount_text,
-                    'date': date_text,
-                    'confidence': 0.9,
-                    'source': 'table-structure'
-                })
+            # If the new item is within threshold of the line's average Y
+            if abs(y_top - avg_y) < y_threshold:
+                current_line.append(item)
+            else:
+                # Finish current line and start new one
+                lines.append(current_line)
+                current_line = [item]
         
-        return items
-    
-    def _extract_financial_totals(self, text: str) -> Dict[str, str]:
-        """Extract financial totals with improved money parsing"""
-        totals = {}
-        
-        # Payment Amount Due pattern
-        payment_due_match = re.search(r'(?i)payment\s+amount\s+due[:\s]*\$?([0-9,]+\.?\d{0,2})', text)
-        if payment_due_match:
-            parsed = self._parse_money_safe(payment_due_match.group(1))
-            totals['total'] = f"{parsed:.2f}"
-        
-        # Total patterns
-        total_match = re.search(r'(?i)total[:\s]*\$?([0-9,]+\.?\d{0,2})', text)
-        if total_match and 'total' not in totals:
-            parsed = self._parse_money_safe(total_match.group(1))
-            totals['total'] = f"{parsed:.2f}"
-        
-        # Look for standalone currency amounts
-        currency_matches = re.findall(r'[\$€e]([0-9,]+\.?\d{0,2})', text)
-        if currency_matches and 'total' not in totals:
-            amounts = [self._parse_money_safe(amt) for amt in currency_matches]
-            amounts = [amt for amt in amounts if amt > 0]
-            if amounts:
-                max_amount = max(amounts)
-                totals['total'] = f"{max_amount:.2f}"
-        
-        # Tax and subtotal with safe parsing
-        tax_match = re.search(r'(?i)tax[:\s]*\$?([0-9,]+\.?\d{0,2})', text)
-        if tax_match:
-            parsed = self._parse_money_safe(tax_match.group(1))
-            totals['tax'] = f"{parsed:.2f}"
-        
-        subtotal_match = re.search(r'(?i)subtotal[:\s]*\$?([0-9,]+\.?\d{0,2})', text)
-        if subtotal_match:
-            parsed = self._parse_money_safe(subtotal_match.group(1))
-            totals['subtotal'] = f"{parsed:.2f}"
-        
-        return totals
-    
-    def _extract_items_from_text(self, text: str) -> List[Dict[str, Any]]:
-        """Extract items from plain text when no table detected"""
-        items = []
+        if current_line:
+            lines.append(current_line)
+            
+        # Process each line: sort by X and join
+        final_text = ""
+        for line in lines:
+            # Sort items in line by X coordinate
+            line.sort(key=lambda x: x[0][0][0])
+            # Join with tabs or logical spaces
+            line_text = "   ".join([x[1] for x in line])
+            final_text += line_text + "\n"
+            
+        return final_text
+
+    def clean_ocr_text(self, text):
+        """Dynamic OCR text cleaning without hardcoded values"""
         lines = text.split('\n')
+        cleaned_lines = []
+        
+        # Find potential vendor name (first meaningful line)
+        vendor_line = None
+        for line in lines[:10]:  # Check first 10 lines
+            line = line.strip()
+            if len(line) > 10 and not line.isdigit() and not re.match(r'^[\d\s\-\.]+$', line):
+                vendor_line = line
+                break
+        
+        # Extract all dollar amounts to identify outliers
+        all_amounts = re.findall(r'\$([\d,]+\.?\d{0,2})', text)
+        numeric_amounts = []
+        for amount in all_amounts:
+            try:
+                numeric_amounts.append(float(amount.replace(',', '')))
+            except:
+                continue
+        
+        # Calculate median to identify outliers
+        if numeric_amounts:
+            numeric_amounts.sort()
+            median = numeric_amounts[len(numeric_amounts)//2]
+            # Consider amounts > 3x median as potential OCR errors
+            outlier_threshold = median * 3 if median > 0 else 1000
+        else:
+            outlier_threshold = 1000
         
         for line in lines:
             line = line.strip()
             if not line:
                 continue
+                
+            # Fix common OCR HTML entities
+            line = re.sub(r'&#\d+;', '', line)
+            line = line.replace('&gt;', '>').replace('&lt;', '<').replace('&quot;', '"')
             
-            # Look for lines with currency amounts
-            if '$' in line or re.search(r'\d+\.\d{2}', line):
-                # Extract description and amount
-                amount_match = re.search(r'\$?([0-9,]+\.?\d{0,2})', line)
-                if amount_match:
-                    amount = amount_match.group(1)
-                    # Remove amount from line to get description
-                    description = re.sub(r'\$?[0-9,]+\.?\d{0,2}', '', line).strip()
-                    description = re.sub(r'\s+', ' ', description)  # Clean whitespace
-                    
-                    if description and len(description) > 2:
-                        # Extract date if present
-                        date_match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', line)
-                        date = date_match.group() if date_match else None
-                        
-                        items.append({
-                            'description': description,
-                            'amount': amount,
-                            'quantity': '1',
-                            'unit_price': amount,
-                            'date': date
-                        })
+            # Clean up spacing around dollar signs
+            line = re.sub(r'\s*\$\s*', '$', line)
+            
+            keep_line = False
+            
+            # Keep vendor line
+            if vendor_line and line == vendor_line:
+                keep_line = True
+            
+            # Keep lines with reasonable dollar amounts
+            elif '$' in line:
+                amounts_in_line = re.findall(r'\$([\d,]+\.?\d{0,2})', line)
+                has_reasonable_amount = False
+                for amount in amounts_in_line:
+                    try:
+                        val = float(amount.replace(',', ''))
+                        if val <= outlier_threshold:  # Not an outlier
+                            has_reasonable_amount = True
+                            break
+                    except:
+                        continue
+                
+                if has_reasonable_amount:
+                    keep_line = True
+            
+            # Keep service/item description lines
+            elif any(keyword in line.lower() for keyword in [
+                'service', 'initial', 'subtotal', 'total', 'tax', 'discount'
+            ]):
+                keep_line = True
+            
+            # Keep date lines
+            elif re.search(r'\d{1,2}/\d{1,2}/\d{4}', line):
+                keep_line = True
+            
+            # Skip obviously garbled lines (too many special characters)
+            special_char_ratio = len(re.findall(r'[^\w\s\$\.,\-]', line)) / max(len(line), 1)
+            if special_char_ratio > 0.3:  # More than 30% special characters
+                keep_line = False
+            
+            if keep_line:
+                # Late-stage clean up: Fix common OCR currency errors
+                # invalid: 82,500.00 (likely $2,500.00 if it's a huge outlier)
+                # pattern: 8 followed by digit, comma, digit
+                
+                # specific fix for "8" -> "$" at start of amounts
+                # Regex for "8" at start of word followed by digits and comma/dot
+                # e.g. 82,500.00 -> $2,500.00
+                # Old regex was too strict. New one handles thousands group:
+                # 8 followed by 1-3 digits, then a comma/dot, then more digits
+                line = re.sub(r'\b8(\d{1,3}[,.]\d{3}[,.]\d{2})', r'$\1', line) # Matches 82,500.00
+                line = re.sub(r'\b8(\d{1,3}[,.]\d{2})', r'$\1', line)          # Matches 82.50
+                line = re.sub(r'\b8(\d{1,3}[,.]\d{3})', r'$\1', line)          # Matches 82,000 (no cents)
+
+                # Fix S -> $
+                line = re.sub(r'\bS(\d)', r'$\1', line)
+                
+                cleaned_lines.append(line)
         
-        return items
+        return '\n'.join(cleaned_lines)
     
-    def _find_line_items_fallback(self, text: str) -> List[Dict[str, Any]]:
-        """Find line items when table detection fails"""
+    def clean_table_headers(self, text):
+        """Remove obvious table headers from OCR text"""
         lines = text.split('\n')
-        items = []
+        cleaned_lines = []
         
-        # Find header line with anchors
-        header_idx = -1
         for i, line in enumerate(lines):
-            line_lower = line.lower()
-            if any(anchor in line_lower for anchor in ['description', 'amount', 'qty', 'rate', 'total', 'service', 'item']):
-                header_idx = i
-                break
-        
-        if header_idx == -1:
-            return items
-        
-        # Collect lines after header until totals section
-        for i in range(header_idx + 1, len(lines)):
-            line = lines[i].strip()
+            line = line.strip()
             if not line:
                 continue
             
-            # Stop at totals section
-            if any(word in line.lower() for word in ['subtotal', 'tax', 'total', 'payment', 'amount due']):
-                break
-            
-            # Extract items from line
-            if '$' in line or re.search(r'\d+\.\d{2}', line):
-                amount_match = re.search(r'\$?([0-9,]+\.\d{2})', line)
-                if amount_match:
-                    amount = amount_match.group(1)
-                    description = re.sub(r'\$?[0-9,]+\.\d{2}', '', line).strip()
-                    
-                    if description and len(description) > 2:
-                        items.append({
-                            'description': description,
-                            'amount': amount,
-                            'quantity': '1',
-                            'unit_price': amount,
-                            'date': None,
-                            'confidence': 0.6,
-                            'source': 'line-item-fallback'
-                        })
-        
-        return items
-    
-    def _extract_vendor_with_scoring(self, text: str) -> str:
-        """Extract vendor name using scoring to avoid generic words"""
-        lines = text.split('\n')
-        candidates = []
-        
-        generic_words = {'invoice', 'bill', 'receipt', 'estimate', 'bill to', 'ship to', 'tax invoice'}
-        
-        for line in lines[:10]:  # Check first 10 lines
-            line = line.strip()
-            if len(line) < 3:
+            # Skip lines that look like table headers
+            # (short lines with common header words)
+            if len(line) <= 5 and line.upper() in ['TEM', 'ITEM', 'QTY', 'COST', 'PRICE', 'DESC']:
                 continue
-            
-            score = 0
-            line_lower = line.lower()
-            
-            # Negative scoring for generic words
-            if line_lower in generic_words:
+                
+            # Skip lines that are just column separators or formatting
+            if all(c in '-_=|+' for c in line.replace(' ', '')):
                 continue
-            
-            # Positive scoring
-            if any(indicator in line for indicator in ['LLC', 'INC', 'CORP', 'LTD', 'CO.']):
-                score += 10
-            elif any(word in line.lower() for word in ['studio', 'design', 'pixel', 'company']):
-                score += 8  # Design company indicators
-            
-            if re.search(r'^[A-Z][A-Za-z\s&]+$', line):  # Looks like company name
-                score += 5
-            
-            if len(line) > 5 and len(line) < 50:  # Reasonable length
-                score += 3
-            
-            # Avoid phone/email/address patterns
-            if re.search(r'\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|@|\d{5}', line):
-                score -= 5
-            
-            if score > 0:
-                candidates.append((score, line))
+                
+            cleaned_lines.append(line)
         
-        if candidates:
-            candidates.sort(reverse=True)
-            return candidates[0][1]
-        
-        return None
+        return '\n'.join(cleaned_lines)
     
-    def _score_vendor_candidate(self, line: str) -> float:
-        """Score a single vendor candidate line"""
-        if len(line) < 3:
-            return 0
+    def extract_invoice_data_hybrid(self, file_path):
+        """Two-step process: OCR extraction + Ollama processing"""
+        print(f"Processing: {file_path}")
         
-        score = 0
-        line_lower = line.lower()
+        # Step 1: Extract text using OCR
+        print("Step 1: Extracting text with OCR...")
+        extracted_text = self.extract_text(file_path)
         
-        # Skip generic words
-        if line_lower in {'invoice', 'bill', 'receipt', 'estimate'}:
-            return 0
+        if not extracted_text or len(extracted_text.strip()) < 10:
+            print("OCR extraction failed or insufficient text")
+            return None
         
-        # Company indicators
-        if any(word in line for word in ['LLC', 'INC', 'CORP', 'LTD', 'Studio', 'Design']):
-            score += 10
+        print(f"OCR extracted {len(extracted_text)} characters")
         
-        # Looks like company name
-        if re.match(r'^[A-Z][A-Za-z\s]+$', line) and len(line) < 30:
-            score += 5
+        # Step 1.2: Fix common OCR artifacts (8 -> $, S -> $)
+        # This must be done BEFORE sending to LLM
         
-        # Avoid addresses/phones
-        if re.search(r'\d{3}[-.\s]?\d{3}|@|\d{5}', line):
-            score -= 10
+        # Fix 8 -> $ for patterns like 82,500.00 -> $2,500.00
+        extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3}[,.]\d{2})', r'$\1', extracted_text) 
+        extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{2})', r'$\1', extracted_text)
+        extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3})', r'$\1', extracted_text)
+
+        # Fix S -> $
+        extracted_text = re.sub(r'\bS(\d)', r'$\1', extracted_text) # S500.00 -> $500.00
         
-        return score
-    
-    def _try_ocr_with_preprocessing(self, image_path: str, preprocess_func) -> List[TextBox]:
-        """Try OCR with preprocessing"""
-        img = cv2.imread(image_path)
-        processed_img = preprocess_func(img)
+        # Step 1.5: Clean table headers
+        cleaned_text = self.clean_table_headers(extracted_text)
         
-        # Save temp image
-        temp_path = "temp_processed.jpg"
-        cv2.imwrite(temp_path, processed_img)
+        # Debug: Show the cleaned OCR text
+        print("\nCleaned OCR text being sent to LLM:")
+        print("-" * 50)
+        print(cleaned_text)
+        print("-" * 50)
         
-        try:
-            result = self._extract_with_paddleocr(temp_path)
-        except:
-            result = self._extract_with_easyocr(temp_path)
+        # Step 2: Process cleaned text with Ollama
+        print("Step 2: Processing with Ollama...")
+        ollama_result = self.process_with_ollama(cleaned_text)
         
-        # Clean up
-        import os
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-        return result
-    
-    def _enhance_contrast(self, img):
-        """Enhance contrast and brightness"""
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        l = clahe.apply(l)
-        return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
-    
-    def _adaptive_threshold(self, img):
-        """Apply adaptive thresholding"""
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        return cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
-    
-    def _upscale_2x(self, img):
-        """Upscale image with safety limits"""
-        height, width = img.shape[:2]
-        max_pixels = 80_000_000  # 80M pixel limit
-        
-        # Check if upscaling would exceed limit
-        if (width * 2) * (height * 2) > max_pixels:
-            # Calculate safe scale factor
-            scale = (max_pixels / (width * height)) ** 0.5
-            scale = min(scale, 2.0)  # Cap at 2x
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            print(f"DEBUG: Limited upscale to {scale:.1f}x ({new_width}x{new_height})")
+        if ollama_result:
+            print("Ollama processing successful")
+            return ollama_result
         else:
-            new_width = width * 2
-            new_height = height * 2
-        
-        return cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+            print("Ollama processing failed")
+            return None
     
-    def _score_ocr_result(self, text_boxes: List[TextBox]) -> float:
-        """Score OCR result quality"""
-        if not text_boxes:
-            return 0
-        
-        score = 0
-        money_count = 0
-        header_count = 0
-        
-        for box in text_boxes:
-            text = box.text.lower()
-            
-            # Money patterns
-            if re.search(r'\$?\d+\.\d{2}', box.text):
-                money_count += 1
-                score += 2
-            
-            # Table headers
-            if any(header in text for header in ['qty', 'amount', 'description', 'total', 'price']):
-                header_count += 1
-                score += 3
-            
-            # Confidence bonus
-            score += box.confidence
-        
-        # Bonus for having both money and headers
-        if money_count > 0 and header_count > 0:
-            score += 10
-        
-        return score / len(text_boxes)  # Normalize by box count
     
-    def _is_header_row(self, row_text: str, y_position: float, page_height: float) -> bool:
-        """Check if row is a header based on keywords and position"""
-        text_lower = row_text.strip().lower()
+    def process_with_ollama(self, invoice_text, table_rows=""):
+        """Process invoice text using Ollama with Gemma2 2B model"""
         
-        # Only block if it's EXACTLY a header word (not part of description)
-        exact_header_words = {'quantity', 'qty', 'hours', 'rate', 'unit price', 'amount', 
-                             'subtotal', 'total', 'invoice', 'description', 'tax', 'vat'}
+        # Get the extraction prompt
+        prompt = self.extract_invoice_data_with_prompt(invoice_text, table_rows)
         
-        # Check if the entire text is just a header word
-        if text_lower in exact_header_words:
-            return True
+        # Ollama API endpoint
+        url = "http://localhost:11434/api/generate"
         
-        # Also check if it's just "QUANTITY" in uppercase
-        if text_lower == 'quantity' or row_text.strip() == 'QUANTITY':
-            return True
-        
-        # Top 10% of page (header region) - more lenient
-        if y_position < page_height * 0.1:
-            return True
-        
-        return False
-    
-    def _score_item_row(self, description: str, amount_text: str) -> float:
-        """Score how likely a row is to be a line item"""
-        score = 2  # Start with base score
-        desc_lower = description.lower()
-        
-        # Positive indicators
-        if re.search(r'\d+\s*(hour|hrs|h)', desc_lower):  # Has quantity
-            score += 3
-        
-        if len(description.split()) >= 2:  # Multi-word description
-            score += 2
-        
-        if any(word in desc_lower for word in ['design', 'service', 'labor', 'work', 'web', 'ux', 'typography']):
-            score += 3
-        
-        # Negative indicators - only if it's ONLY these words
-        if description.strip().lower() in ['total', 'subtotal', 'tax', 'invoice', 'quantity', 'amount']:
-            score -= 10
-        
-        return score
-    
-    def _repair_ocr_amount(self, amount_text: str, total_amount: float) -> str:
-        """Fix common OCR errors in amounts"""
-        # Normalize currency format
-        clean_amount = re.sub(r'[€$e\s]', '', amount_text)
-        clean_amount = clean_amount.replace(',', '').replace('.', '')
-        
-        # Handle cases like "00.00" or empty amounts
-        if not clean_amount or clean_amount == '00' or len(clean_amount) < 2:
-            return '0'
-        
-        try:
-            # Add decimal point for currency (last 2 digits are cents)
-            if len(clean_amount) >= 3:
-                amount_str = clean_amount[:-2] + '.' + clean_amount[-2:]
-            else:
-                amount_str = '0.' + clean_amount.zfill(2)
-            
-            amount_val = float(amount_str)
-            
-            # If amount exceeds total by 20%, try removing first digit
-            if total_amount > 0 and amount_val > total_amount * 1.2:
-                if len(clean_amount) > 4:  # Don't break small amounts
-                    # Try removing first digit (65200 -> 5200)
-                    repaired = clean_amount[1:]
-                    if len(repaired) >= 3:
-                        repaired_str = repaired[:-2] + '.' + repaired[-2:]
-                        repaired_val = float(repaired_str)
-                        if repaired_val <= total_amount:
-                            return repaired_str
-            
-            return amount_str
-        except:
-            return amount_text
-    
-    def _calculate_confidence(self, description: str, amount: str, source: str) -> float:
-        """Calculate confidence score for extracted item"""
-        confidence = 0.5  # Base confidence
-        
-        # OCR confidence (40%)
-        if len(description) > 5:
-            confidence += 0.2
-        
-        # Structural confidence (30%)
-        if source == 'table-structure':
-            confidence += 0.3
-        elif source == 'amount-column-cluster':
-            confidence += 0.2
-        
-        # Semantic confidence (30%)
-        if re.search(r'\d+\s*(hour|hrs)', description.lower()):
-            confidence += 0.2
-        
-        if any(word in description.lower() for word in ['design', 'service', 'work']):
-            confidence += 0.1
-        
-        return min(0.95, confidence)
-    
-    def _parse_money_safe(self, text: str) -> float:
-        """Safe money parser with proper comma/decimal handling"""
-        # Strip currency symbols and spaces
-        clean = re.sub(r'[€$e\s]', '', text.strip())
-        
-        if not clean or not re.search(r'\d', clean):
-            return 0
-        
-        # Rule 1: Both comma and period -> comma=thousands, period=decimal
-        if ',' in clean and '.' in clean:
-            # 65,200.00 -> 65200.00
-            clean = clean.replace(',', '')
-        
-        # Rule 2: Only comma
-        elif ',' in clean:
-            parts = clean.split(',')
-            if len(parts) == 2 and len(parts[1]) == 2:
-                # 5200,00 -> 5200.00 (EU decimal)
-                clean = clean.replace(',', '.')
-            else:
-                # 3,000 -> 3000 (thousands)
-                clean = clean.replace(',', '')
-        
-        try:
-            return float(clean)
-        except:
-            return 0
-    
-    def _merge_adjacent_numbers(self, text_boxes: List[TextBox]) -> List[TextBox]:
-        """Merge adjacent number boxes that might be split amounts"""
-        merged = []
-        i = 0
-        
-        while i < len(text_boxes):
-            current = text_boxes[i]
-            
-            # Look for next box on same row
-            if i + 1 < len(text_boxes):
-                next_box = text_boxes[i + 1]
-                
-                # Same row (Y within 10px) and close X (within 50px)
-                if (abs(current.bbox[1] - next_box.bbox[1]) <= 10 and
-                    abs((current.bbox[0] + current.bbox[2]) - next_box.bbox[0]) <= 50):
-                    
-                    # Check if they form a split number (e.g., "3,000" + ".00")
-                    combined = current.text + next_box.text
-                    if re.match(r'^[\d,]+\.[\d]{2}$', combined):
-                        # Merge them
-                        new_bbox = (
-                            current.bbox[0],
-                            current.bbox[1],
-                            (next_box.bbox[0] + next_box.bbox[2]) - current.bbox[0],
-                            max(current.bbox[3], next_box.bbox[3])
-                        )
-                        merged_box = TextBox(combined, new_bbox, 
-                                           min(current.confidence, next_box.confidence))
-                        merged.append(merged_box)
-                        i += 2  # Skip both boxes
-                        continue
-            
-            merged.append(current)
-            i += 1
-        
-        return merged
-    
-    def _find_money_candidates(self, text_boxes: List[TextBox]) -> List[Tuple[float, TextBox]]:
-        """Find money-ish candidates with relaxed patterns"""
-        candidates = []
-        
-        for box in text_boxes:
-            text = box.text.strip()
-            
-            # Money-ish: at least 3 digits OR ends with 2 decimals OR has separators
-            if (len(re.findall(r'\d', text)) >= 3 or
-                re.search(r'\d{1,3}\.[\d]{2}$', text) or
-                re.search(r'[.,]', text)):
-                
-                value = self._parse_money_safe(text)
-                if 10 <= value <= 100000:  # Reasonable range
-                    candidates.append((value, box))
-                    print(f"DEBUG: Money candidate: '{text}' -> {value}")
-        
-        return candidates
-    
-    def _extract_items_by_amount_column(self, all_text: str, text_boxes: List[TextBox]) -> List[Dict[str, Any]]:
-        """Extract items using improved money detection and merging"""
-        if not hasattr(self, '_current_text_boxes'):
-            return []
-        
-        # Merge adjacent number boxes first
-        merged_boxes = self._merge_adjacent_numbers(self._current_text_boxes)
-        
-        # Find quantity anchors
-        qty_anchors = []
-        for box in merged_boxes:
-            text = box.text.lower().replace('|', 'l')
-            qty_match = re.search(r'\b(\d{1,3})\s*(h|hr|hrs|hour|hours)\b', text)
-            if qty_match:
-                qty_anchors.append({
-                    'qty': int(qty_match.group(1)),
-                    'y_center': box.bbox[1] + box.bbox[3]/2,
-                    'box': box
-                })
-        
-        # Find money candidates with improved detection
-        money_candidates = self._find_money_candidates(merged_boxes)
-        
-        # Debug: print tokens near right column for missing amounts
-        if money_candidates:
-            right_x = max(box.bbox[0] + box.bbox[2] for _, box in money_candidates)
-            print(f"DEBUG: Right column X: {right_x}")
-            
-            for box in merged_boxes:
-                if box.bbox[0] > right_x * 0.7:  # Right 30% of page
-                    print(f"DEBUG: Right column token: '{box.text}' at ({box.bbox[0]}, {box.bbox[1]})")
-        
-        if not qty_anchors or len(money_candidates) < 2:
-            return []
-        
-        # Cluster by X position
-        x_coords = [box.bbox[0] + box.bbox[2]/2 for _, box in money_candidates]
-        x_coords.sort()
-        
-        if len(x_coords) >= 4:
-            mid_x = x_coords[len(x_coords)//2]
-            unit_candidates = [(v, b) for v, b in money_candidates if b.bbox[0] + b.bbox[2]/2 < mid_x]
-            total_candidates = [(v, b) for v, b in money_candidates if b.bbox[0] + b.bbox[2]/2 >= mid_x]
-        else:
-            unit_candidates = money_candidates
-            total_candidates = money_candidates
-        
-        items = []
-        row_tol = 60  # Row tolerance
-        
-        for anchor in qty_anchors:
-            qty = anchor['qty']
-            y_center = anchor['y_center']
-            
-            # Find candidates in row
-            up_candidates = [(v, b) for v, b in unit_candidates 
-                           if abs(b.bbox[1] + b.bbox[3]/2 - y_center) <= row_tol]
-            total_cands = [(v, b) for v, b in total_candidates 
-                         if abs(b.bbox[1] + b.bbox[3]/2 - y_center) <= row_tol]
-            
-            # Find best math match
-            best_match = None
-            best_error = float('inf')
-            
-            for up_val, up_box in up_candidates:
-                for total_val, total_box in total_cands:
-                    expected = qty * up_val
-                    error = abs(expected - total_val) / max(expected, total_val)
-                    if error < best_error:
-                        best_error = error
-                        best_match = (up_val, up_box, total_val, total_box)
-            
-            if best_match and best_error < 0.3:
-                up_val, up_box, total_val, total_box = best_match
-                
-                # Find description
-                desc_boxes = []
-                for box in merged_boxes:
-                    box_y = box.bbox[1] + box.bbox[3]/2
-                    if (abs(box_y - y_center) <= row_tol and
-                        box.bbox[0] < up_box.bbox[0] and
-                        not re.search(r'\d.*[.,].*\d|\d{2,}', box.text)):
-                        desc_boxes.append(box)
-                
-                if desc_boxes:
-                    desc_boxes.sort(key=lambda b: b.bbox[0])
-                    description = ' '.join(box.text for box in desc_boxes)
-                    
-                    items.append({
-                        'description': description,
-                        'amount': f"{total_val:.2f}",
-                        'quantity': str(qty),
-                        'unit_price': f"{up_val:.2f}",
-                        'date': None,
-                        'confidence': 0.9 if best_error < 0.1 else 0.7,
-                        'source': 'improved-qty-anchored'
-                    })
-        
-        return items
-    
-    def _find_table_region(self, text_boxes: List[TextBox]) -> Tuple[int, int]:
-        """Find table Y boundaries using header keywords"""
-        # Find table header row
-        header_keywords = ['description', 'quantity', 'unit price', 'amount', 'qty', 'rate']
-        header_y = None
-        
-        for box in text_boxes:
-            text_lower = box.text.lower().strip()
-            if any(keyword in text_lower for keyword in header_keywords):
-                if header_y is None or box.bbox[1] < header_y:
-                    header_y = box.bbox[1]
-        
-        if header_y is None:
-            return 0, float('inf')  # No table found
-        
-        # Find table bottom (total/subtotal)
-        total_keywords = ['total', 'subtotal', 'payment', 'due']
-        bottom_y = float('inf')
-        
-        for box in text_boxes:
-            text_lower = box.text.lower().strip()
-            if any(keyword in text_lower for keyword in total_keywords) and box.bbox[1] > header_y:
-                if box.bbox[1] < bottom_y:
-                    bottom_y = box.bbox[1]
-        
-        table_top = header_y + 30  # Skip header row itself
-        table_bottom = bottom_y - 20 if bottom_y != float('inf') else header_y + 500
-        
-        return table_top, table_bottom
-    
-    def _extract_table_rows_anchored(self, text_boxes: List[TextBox]) -> List[Dict[str, Any]]:
-        """Universal invoice parser - handles any invoice format worldwide"""
-        # Step 1: Find ALL money values in document (more aggressive detection)
-        all_money = []
-        for box in text_boxes:
-            value = self._parse_money_safe(box.text)
-            if value >= 1:  # Any reasonable amount
-                all_money.append((value, box))
-                print(f"DEBUG: Money found: '{box.text}' -> {value} at Y={box.bbox[1]}")
-        
-        # Also look for missing 30.00 - check if we can infer it
-        # From the debug, we see 15.00 at Y=3155 and Y=3287, and 2 at Y=3310
-        # The missing 30.00 should be around Y=3085 based on "Front and rear brake cables"
-        for box in text_boxes:
-            if box.text.strip() == "30.00" or "30.00" in box.text:
-                value = 30.0
-                all_money.append((value, box))
-                print(f"DEBUG: Added missing 30.00 at Y={box.bbox[1]}")
-        
-        if len(all_money) < 2:
-            return []
-        
-        print(f"DEBUG: Found {len(all_money)} money values")
-        
-        # Step 2: Group money by rows (Y coordinate)
-        money_rows = {}
-        for value, box in all_money:
-            y = box.bbox[1] + box.bbox[3]//2
-            # Group by Y with tolerance
-            found_row = False
-            for existing_y in money_rows:
-                if abs(y - existing_y) <= 50:  # Same row tolerance
-                    money_rows[existing_y].append((value, box))
-                    found_row = True
-                    break
-            if not found_row:
-                money_rows[y] = [(value, box)]
-        
-        # Step 3: Find quantity patterns everywhere
-        qty_patterns = []
-        for box in text_boxes:
-            text = box.text.strip()
-            y = box.bbox[1] + box.bbox[3]//2
-            
-            # Pattern 1: "X hours/hrs"
-            qty_match = re.search(r'\b(\d{1,3})\s*(h|hr|hrs|hour|hours)\b', text.lower())
-            if qty_match:
-                qty_patterns.append((int(qty_match.group(1)), y, box))
-            
-            # Pattern 2: Pure numbers (1-99)
-            elif re.match(r'^\d{1,2}$', text) and 1 <= int(text) <= 99:
-                qty_patterns.append((int(text), y, box))
-            
-            # Pattern 3: "Qty: X" or "Quantity: X"
-            elif re.search(r'(qty|quantity)[:\s]*(\d+)', text.lower()):
-                match = re.search(r'(qty|quantity)[:\s]*(\d+)', text.lower())
-                qty_patterns.append((int(match.group(2)), y, box))
-        
-        print(f"DEBUG: Found {len(qty_patterns)} quantity patterns")
-        
-        # Step 4: Universal item extraction - try all combinations
-        items = []
-        
-        # Method 1: Quantity-based matching with better row detection
-        for qty, qty_y, qty_box in qty_patterns:
-            print(f"DEBUG: Processing quantity {qty} at Y={qty_y}")
-            # Find money values in same row with larger tolerance
-            row_money = []
-            for money_y, money_list in money_rows.items():
-                if abs(money_y - qty_y) <= 200:  # Larger tolerance for row matching
-                    row_money.extend(money_list)
-            
-            print(f"DEBUG: Row money for qty {qty}: {[(v, b.bbox[0]) for v, b in row_money]}")
-            
-            if len(row_money) >= 2:
-                # Try all combinations to find qty * unit_price = amount
-                best_match = None
-                best_error = float('inf')
-                
-                for i, (val1, box1) in enumerate(row_money):
-                    for j, (val2, box2) in enumerate(row_money):
-                        if i != j:
-                            # Test if qty * val1 = val2 or qty * val2 = val1
-                            error1 = abs(qty * val1 - val2) / max(val2, 1)
-                            error2 = abs(qty * val2 - val1) / max(val1, 1)
-                            
-                            print(f"DEBUG: Test {qty} x {val1} = {qty * val1} vs {val2}, error = {error1:.3f}")
-                            print(f"DEBUG: Test {qty} x {val2} = {qty * val2} vs {val1}, error = {error2:.3f}")
-                            
-                            # More lenient tolerance for real-world data
-                            if error1 < 0.1 and error1 < best_error:  # 10% tolerance
-                                best_match = (val1, val2, box1, box2)
-                                best_error = error1
-                            elif error2 < 0.1 and error2 < best_error:
-                                best_match = (val2, val1, box2, box1)
-                                best_error = error2
-                
-                if best_match:
-                    unit_price, amount, up_box, amt_box = best_match
-                    # Find description using universal method
-                    desc = self._find_description_universal(text_boxes, qty_y, qty_box.bbox[0])
-                    
-                    items.append({
-                        'description': desc,
-                        'quantity': qty,
-                        'unit_price': f"{unit_price:.2f}",
-                        'amount': f"{amount:.2f}",
-                        'confidence': 0.9
-                    })
-                    print(f"DEBUG: Found match: {qty} x {unit_price} = {amount} ({desc})")
-                else:
-                    print(f"DEBUG: No match found for quantity {qty}")
-        
-        # Method 2: Manual pattern matching for this specific invoice
-        if len(items) < 2:  # We should have at least 2 items
-            print("DEBUG: Adding manual patterns for missing items...")
-            
-            # From the header debug, we can see:
-            # Y=3085 X=4402 '30.00' - this is the missing amount!
-            # Y=3051 X=1319 'Front and rear brake cables' - this is the description
-            # Y=3310 X=1074 '2' - this is the quantity
-            
-            # Add the missing item manually
-            items.append({
-                'description': 'Front and rear brake cables',
-                'quantity': 2,
-                'unit_price': '15.00',
-                'amount': '30.00',
-                'confidence': 0.95
-            })
-            print("DEBUG: Added missing item: 2 x 15.00 = 30.00 (Front and rear brake cables)")
-        
-        # Method 3: Final check - ensure we have the correct total
-        if items:
-            total_from_items = sum(float(item['amount']) for item in items)
-            print(f"DEBUG: Total from items: {total_from_items}")
-        
-        # Method 4: Final fallback - description + amount pairs
-        if not items:
-            print("DEBUG: Trying explicit pattern matching...")
-            
-            # Find rows with clear quantity indicators
-            for box in text_boxes:
-                text = box.text.strip()
-                y = box.bbox[1] + box.bbox[3]//2
-                
-                # Look for "Labor Xhrs" pattern
-                labor_match = re.search(r'labor\s+(\d+)\s*hrs?', text.lower())
-                if labor_match:
-                    qty = int(labor_match.group(1))
-                    print(f"DEBUG: Found labor pattern: {qty} hours at Y={y}")
-                    
-                    # Find money values near this Y
-                    nearby_money = []
-                    for money_y, money_list in money_rows.items():
-                        if abs(money_y - y) <= 150:  # Larger tolerance for labor
-                            nearby_money.extend(money_list)
-                    
-                    if len(nearby_money) >= 2:
-                        values = sorted([v for v, _ in nearby_money])
-                        # Try to find qty * unit_price = amount
-                        for i, unit_price in enumerate(values[:-1]):
-                            for amount in values[i+1:]:
-                                if abs(qty * unit_price - amount) < 0.01:
-                                    items.append({
-                                        'description': text,
-                                        'quantity': qty,
-                                        'unit_price': f"{unit_price:.2f}",
-                                        'amount': f"{amount:.2f}",
-                                        'confidence': 0.9
-                                    })
-                                    print(f"DEBUG: Labor match: {qty} x {unit_price} = {amount}")
-                                    break
-                
-                # Look for pure number quantities in left column
-                elif (re.match(r'^\d{1,2}$', text) and 1 <= int(text) <= 50 and
-                      box.bbox[0] < 1500):  # Left side of document
-                    qty = int(text)
-                    print(f"DEBUG: Found left-column quantity: {qty} at Y={y}")
-                    
-                    # Find money values in same row (tighter tolerance)
-                    row_money = []
-                    for money_y, money_list in money_rows.items():
-                        if abs(money_y - y) <= 80:
-                            row_money.extend(money_list)
-                    
-                    if len(row_money) >= 2:
-                        values = sorted([v for v, _ in row_money])
-                        # Find perfect mathematical relationship
-                        for i, unit_price in enumerate(values[:-1]):
-                            for amount in values[i+1:]:
-                                if abs(qty * unit_price - amount) < 0.01:
-                                    desc = self._find_description_universal(text_boxes, y, box.bbox[0])
-                                    items.append({
-                                        'description': desc,
-                                        'quantity': qty,
-                                        'unit_price': f"{unit_price:.2f}",
-                                        'amount': f"{amount:.2f}",
-                                        'confidence': 0.95
-                                    })
-                                    print(f"DEBUG: Perfect qty match: {qty} x {unit_price} = {amount} ({desc})")
-                                    break
-        
-        # Method 4: Final fallback - description + amount pairs
-        if not items:
-            print("DEBUG: Using final fallback - description + amount pairs...")
-            
-            for row_y, money_list in money_rows.items():
-                if money_list:
-                    # Take largest amount as line total
-                    amount = max(v for v, _ in money_list)
-                    desc = self._find_description_universal(text_boxes, row_y, 0)
-                    
-                    if len(desc) > 3 and amount >= 10:  # Valid description and reasonable amount
-                        items.append({
-                            'description': desc,
-                            'quantity': 1,
-                            'unit_price': f"{amount:.2f}",
-                            'amount': f"{amount:.2f}",
-                            'confidence': 0.5
-                        })
-                        print(f"DEBUG: Fallback item: {desc} = {amount}")
-        
-        return items[:10]  # Limit to 10 items max
-    
-    def _find_description_universal(self, text_boxes: List[TextBox], target_y: int, exclude_x: int) -> str:
-        """Find description text near target Y coordinate"""
-        desc_boxes = []
-        
-        for box in text_boxes:
-            box_y = box.bbox[1] + box.bbox[3]//2
-            text = box.text.strip()
-            
-            # Same row, not a number, not empty, not header words
-            if (abs(box_y - target_y) <= 80 and
-                len(text) > 1 and
-                not re.match(r'^[\d.,]+$', text) and
-                text.lower() not in ['qty', 'quantity', 'unit', 'price', 'amount', 'total', 'description'] and
-                box.bbox[0] != exclude_x):  # Not the quantity box itself
-                desc_boxes.append(box)
-        
-        if desc_boxes:
-            # Sort by X position (left to right)
-            desc_boxes.sort(key=lambda b: b.bbox[0])
-            description = ' '.join(box.text.strip() for box in desc_boxes)
-            return re.sub(r'\s+', ' ', description).strip()
-        
-        return "Item"
-        """Build structured rows + money columns for LLM"""
-        # Group into rows by Y coordinate
-        rows = self._group_into_rows(text_boxes)
-        
-        # Find money columns
-        money_candidates = self._find_money_candidates(text_boxes)
-        x_coords = [box.bbox[0] + box.bbox[2]/2 for _, box in money_candidates]
-        
-        money_columns = {}
-        if len(x_coords) >= 2:
-            x_coords.sort()
-            money_columns['unit_price_x'] = x_coords[len(x_coords)//2] if len(x_coords) > 2 else x_coords[0]
-            money_columns['amount_x'] = x_coords[-1]
-        
-        # Build structured rows with candidates
-        structured_rows = []
-        for i, row in enumerate(rows):
-            if len(row) < 2:  # Skip single-token rows
-                continue
-                
-            row_data = {
-                'y': int(sum(box.bbox[1] for box in row) / len(row)),
-                'tokens': [{'text': box.text, 'x': box.bbox[0]} for box in row],
-                'candidates': self._extract_row_candidates(row, money_columns)
+        payload = {
+            "model": "llama3.2:latest",
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.0,
+                "top_p": 0.9,
+                "num_predict": 2000
             }
-            structured_rows.append(row_data)
-        
-        return {
-            'rows': structured_rows,
-            'money_columns': money_columns,
-            'page_width': max(box.bbox[0] + box.bbox[2] for box in text_boxes) if text_boxes else 0
         }
-    
-    def _extract_row_candidates(self, row: List[TextBox], money_columns: Dict) -> Dict[str, List]:
-        """Extract candidates for each field type from a row"""
-        candidates = {
-            'quantity': [],
-            'unit_price': [],
-            'amount': [],
-            'description': []
-        }
-        
-        for box in row:
-            text = box.text.strip()
-            x = box.bbox[0]
-            
-            # Quantity candidates (numbers + hours)
-            if re.search(r'\b(\d{1,3})\s*(h|hr|hrs|hour|hours)\b', text.lower()):
-                match = re.search(r'\b(\d{1,3})\s*', text)
-                if match:
-                    candidates['quantity'].append(int(match.group(1)))
-            
-            # Money candidates
-            money_val = self._parse_money_safe(text)
-            if money_val > 0:
-                # Classify by X position
-                if money_columns.get('unit_price_x') and abs(x - money_columns['unit_price_x']) < 100:
-                    candidates['unit_price'].append(money_val)
-                elif money_columns.get('amount_x') and abs(x - money_columns['amount_x']) < 100:
-                    candidates['amount'].append(money_val)
-                else:
-                    # Add to both if unsure
-                    candidates['unit_price'].append(money_val)
-                    candidates['amount'].append(money_val)
-            
-            # Description candidates (non-numeric text)
-            if not re.search(r'\d.*[.,].*\d|\d{3,}', text) and len(text) > 2:
-                candidates['description'].append(text)
-        
-        return candidates
-    
-    def extract_with_llm(self, image_path: str) -> Dict[str, Any]:
-        """Extract invoice data using table region isolation + LLM for header"""
-        # Get OCR text + positions
-        text_boxes = self.extract_text_with_coordinates(image_path)
-        
-        # Extract items using table region + anchors (rule-based)
-        items = self._extract_table_rows_anchored(text_boxes)
-        
-        # Use LLM only for header info (vendor, date, invoice#)
-        header_boxes = [box for box in text_boxes if box.bbox[1] < 3500]  # Expand to include middle region
-        header_data = [{'text': box.text, 'x': box.bbox[0], 'y': box.bbox[1]} 
-                      for box in header_boxes]
-        
-        prompt = f"""Extract header info from invoice OCR data. Return ONLY JSON.
-
-{json.dumps(header_data[:15], indent=2)}
-
-Extract:
-- vendor_name: Look for company name (Studio, Pixel, Design, etc.)
-- date: Find date pattern (MM/DD/YYYY)
-- invoice_number: Find number after "Invoice" or "No:"
-
-Return ONLY JSON:
-{{"vendor_name": "", "date": "", "invoice_number": ""}}"""
         
         try:
-            response = requests.post("http://localhost:11434/api/generate", json={
-                "model": "mistral:7b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0, "num_predict": 200}
-            })
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
             
-            result = response.json()["response"]
-            start = result.find('{')
-            end = result.rfind('}') + 1
+            result = response.json()
+            raw_response = result.get('response', '')
             
-            if start >= 0 and end > start:
-                header_info = json.loads(result[start:end])
-                # Fix vendor name if it's an array
-                if isinstance(header_info.get('vendor_name'), list):
-                    header_info['vendor_name'] = ' '.join(header_info['vendor_name'])
-            else:
-                header_info = {"vendor_name": "", "date": "", "invoice_number": ""}
-        except:
-            header_info = {"vendor_name": "", "date": "", "invoice_number": ""}
-        
-        # Debug: print all header boxes to see what we have
-        print("DEBUG: Header boxes:")
-        for box in header_boxes:
-            print(f"  Y={box.bbox[1]:4d} X={box.bbox[0]:4d} '{box.text}'")
-        
-        # Look for all potential invoice numbers in debug
-        print("DEBUG: Potential invoice numbers:")
-        for box in header_boxes:
-            if re.search(r'\d', box.text) and len(box.text) >= 4:
-                print(f"  '{box.text}' at Y={box.bbox[1]}")
-        
-        # Extract date and invoice number using anchor-based approach
-        date_found = ""
-        invoice_found = ""
-        
-        # Find anchors and look for values nearby
-        for box in header_boxes:
-            # Date anchors
-            if any(anchor in box.text.lower() for anchor in ['issue date', 'date:', 'invoice date']):
-                # Look for date in nearby boxes
-                for other_box in header_boxes:
-                    if (abs(other_box.bbox[1] - box.bbox[1]) < 50 and  # Same row
-                        other_box.bbox[0] > box.bbox[0]):  # To the right
-                        for pattern in [r'\b(\d{1,2}/\d{1,2}/\d{4})\b', r'\b(\d{2}/\d{2}/\d{4})\b']:
-                            date_match = re.search(pattern, other_box.text)
-                            if date_match:
-                                date_found = date_match.group(1)
-                                break
-                        if date_found:
-                            break
-            
-            # Invoice number anchors - look for various patterns
-            if any(anchor in box.text.lower() for anchor in ['invoice no', 'invoice number', 'no:', 'invoice']):
-                # Look for number in nearby boxes
-                for other_box in header_boxes:
-                    if (abs(other_box.bbox[1] - box.bbox[1]) < 100 and  # Larger tolerance
-                        other_box.bbox[0] > box.bbox[0] - 200):  # Look left and right
-                        # Dynamic invoice number patterns - no hardcoded formats
-                        inv_patterns = [
-                            r'\b([A-Z]{1,5}-?\d{1,10})\b',  # Letter-number combinations
-                            r'\b(\d{4,})\b',  # Numbers 4+ digits
-                            r'\b([A-Z]{2,}\d+)\b',  # Letters followed by numbers
-                            r'\b(\d+[-/]\d+)\b'  # Number-separator-number
-                        ]
-                        for pattern in inv_patterns:
-                            inv_match = re.search(pattern, other_box.text)
-                            if inv_match and len(inv_match.group(1)) >= 4:
-                                invoice_found = inv_match.group(1)
-                                print(f"DEBUG: Found invoice candidate: '{invoice_found}' from '{other_box.text}'")
-                                break
-                        if invoice_found:
-                            break
-        
-        # Override LLM results with rule-based if found
-        if date_found:
-            header_info['date'] = date_found
-        if invoice_found:
-            header_info['invoice_number'] = invoice_found
-        
-        # Find total - sum line items or look for reasonable total
-        total_amount = "0.00"
-        
-        # Calculate from line items first
-        if items:
-            calculated_total = sum(float(item['amount']) for item in items)
-            total_amount = f"{calculated_total:.2f}"
-        else:
-            # Fallback: look for reasonable total in footer
-            footer_boxes = [box for box in text_boxes if box.bbox[1] > 4500]
-            for box in footer_boxes:
-                parsed = self._parse_money_safe(box.text)
-                if 1000 <= parsed <= 10000:  # Reasonable range
-                    total_amount = f"{parsed:.2f}"
-                    break
-        
-        return {
-            **header_info,
-            'items': items,
-            'total': total_amount
-        }
+            # Try to extract JSON from the response
+            try:
+                # Find JSON in the response
+                start_idx = raw_response.find('{')
+                end_idx = raw_response.rfind('}') + 1
+                
+                if start_idx != -1:
+                    if end_idx <= start_idx:
+                        # If finding from right failed (likely truncated), take to end
+                        json_str = raw_response[start_idx:]
+                    else:
+                        json_str = raw_response[start_idx:end_idx]
+                    
+                    # Parse JSON directly
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parse error: {e}")
+                        print(f"Raw JSON (first 500 chars): {json_str[:500]}")
+                        return None
+                else:
+                    print("No valid JSON found in response")
+                    print(f"Raw response: {raw_response}")
+                    return None
+                    
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {e}")
+                print(f"Raw response: {raw_response}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            print(f"Error calling Ollama API: {e}")
+            return None
     
-    def process_document(self, image_path: str, schema_type: str = 'invoice') -> Dict[str, Any]:
-        """Main pipeline: process document end-to-end"""
-        print(f"Processing {image_path} with universal layout pipeline...")
+    def extract_invoice_data_with_prompt(self, invoice_text, table_rows=""):
+        """Convert invoice text to exact JSON format using the extraction prompt"""
         
-        # Step 1: Extract text with coordinates
-        print("Step 1: Extracting text with coordinates...")
-        text_boxes = self.extract_text_with_coordinates(image_path)
-        self._current_text_boxes = text_boxes  # Store for amount-column clustering
-        print(f"Found {len(text_boxes)} text boxes")
+        prompt = f"""You are an invoice extraction engine. Extract ONLY the main billable services.
         
-        # Get image dimensions
-        img = cv2.imread(image_path)
-        height, width = img.shape[:2]
-        
-        # Step 2: Detect layout blocks
-        print("Step 2: Detecting layout blocks...")
-        blocks = self.detect_layout_blocks(text_boxes, (height, width))
-        print(f"Detected {len(blocks)} layout blocks:")
-        for block in blocks:
-            print(f"  - {block.block_type}: {len(block.text_boxes)} text boxes")
-        
-        # Step 3: Process each block
-        print("Step 3: Processing blocks...")
-        processed_blocks = self.process_blocks(blocks)
-        
-        # Step 4: Convert to business schema
-        print(f"Step 4: Converting to {schema_type} schema...")
-        result = self.convert_to_business_json(processed_blocks, schema_type)
-        
-        return result
+        CRITICAL: 
+        1. VENDOR NAME is usually at the very top. Look for:
+           - Large text at the start (e.g. "GILLS TREE...", "RELIANT PEST...")
+           - Email domains (e.g. "@gillstreeservice.com" -> "Gills Tree Service")
+           - Logos text at the top left/right.
+        2. Extract valid JSON only.
+Do not include markdown blocks (```json).
+Do not add comments.
+Ensure all JSON keys and values are properly quoted and valid.
+Do not add trailing commas.
+Output must match this exact schema:
 
-def main():
-    """Example usage"""
-    import sys
-    import os
-    
-    if len(sys.argv) < 2:
-        print("Usage: python universal_layout_pipeline.py <image_path> [schema_type|llm]")
-        return
-    
-    image_path = sys.argv[1]
-    mode = sys.argv[2] if len(sys.argv) > 2 else 'invoice'
-    
-    if not os.path.exists(image_path):
-        print(f"File not found: {image_path}")
-        return
-    
-    # Initialize pipeline
-    pipeline = UniversalLayoutPipeline()
-    
-    try:
-        if mode == 'llm':
-            # Use LLM extraction
-            print(f"Processing {image_path} with LLM extraction...")
-            result = pipeline.extract_with_llm(image_path)
-        else:
-            # Use traditional pipeline
-            result = pipeline.process_document(image_path, mode)
+{{
+  "vendor_name": null,
+  "date": null,
+  "subtotal": null,
+  "tax_amount": null,
+  "discount_amount": null,
+  "total": null,
+  "items": [
+    {{ "item_name": null, "unit_price": null, "quantity": null, "amount": null }}
+  ]
+}}
+
+STRICT RULES:
+1) Extract EVERY service line that has a price. Do not skip any.
+2) If you see multiple dollar amounts in the text, usually each one corresponds to an item.
+    - Exception: If a line has "$2500 $2500", it is ONE item of $2500.
+3) Extract CLEAN item names without any dollar amounts or prices.
+4) Use the text exactly as it appears for descriptions.
+5) "Card Processing Fee" IS an item.
+6) Trust the "Total" printed on the invoice for the 'total' field.
+5) "Discount" is NOT an item. Put it in "discount_amount". eg. "Discount $50.00" -> discount_amount: 50.00
+6) Trust the "Total" printed on the invoice for the 'total' field.
+7) EXTRACT the "Subtotal" printed on the invoice. Do NOT calculate it yourself.
+8) Ensure extracted amounts are numbers (e.g. 1500.00, not "1,500.00").
+
+For items:
+- Focus on main service lines that have clear dollar amounts
+- Look for patterns like: [Service Description] followed by [Dollar Amount]
+- Ignore material lists and supply details
+- Only include services where the amount makes sense with the subtotal
+- Extract ONLY the service/item description text, removing any dollar amounts
+- Clean item names should not contain prices, quantities, or dollar signs
+- Example: "Web Design Service $500.00" -> item_name: "Web Design Service"
+- Example: "Consultation 2 hrs $150.00" -> item_name: "Consultation"
+- Focus on the descriptive text before any numbers or dollar amounts
+
+For totals:
+- Find "Subtotal" and extract that exact amount
+- Find "Total" and extract that exact amount
+- Verify that item amounts add up to subtotal
+
+INVOICE TEXT (OCR extracted):
+<<<
+{invoice_text}
+>>>
+
+Notes on Layout & Extraction Rules:
+Map all variations to these standard fields.
+
+1) quantity
+If header contains any of:
+QTY, Qty, qty, QUANTITY, Quantity, quantity,
+Qnt, Qnt., Nos, Nos., Units, Unit, Pcs, Pieces, Pc
+
+→ Map to: quantity
+
+2) unit_price
+If header contains any of:
+Rate, Price, Unit Price, U.Price, U/Price,
+Cost, Each, Per Unit, Per Qty
+
+→ Map to: unit_price
+
+3) total_price
+If header contains any of:
+Amount, Amt, Total, Line Total,
+Value, Net Amount, Gross
+
+→ Map to: total_price
+
+4) description
+If header contains any of:
+Item, Product, Particulars,
+Details, Description, Desc
+
+→ Map to: description
+
+5) hsn_code
+If header contains any of:
+HSN, HSN/SAC, SAC, HSN Code, Service Code
+
+→ Map to: hsn_code
+
+6) tax_rate
+If header contains any of:
+GST %, Tax %, CGST %, SGST %, IGST %
+
+→ Map to: tax_rate
+
+7) tax_amount
+If header contains any of:
+GST Amt, Tax Amt, CGST Amt, SGST Amt, IGST Amt
+
+→ Map to: tax_amount
+
+1.  **Line Items**: Look for lines with specific service descriptions AND a price.
+    -   Example: "Service Description... $120.00" -> Item: "Service Description", Amount: 120.00
+    -   Example: "Another Service... $150.00" -> Item: "Another Service", Amount: 150.00
+2.  **Totals/Subtotals are NOT Items**:
+    -   "Subtotal $1000.00" is a SUMMARY, NOT a billable item. Do not list it in the 'items' array.
+    -   "Total $1000.00" is a SUMMARY.
+    -   The 'items' array should sum up to the Subtotal.
+3.  **Parsing Help**:
+    -   "1-24 S150.00" -> The 'S' is likely a '$'.
+    -   "82,500.00" -> The '8' is likely a '$' if the item price seems wrong.
+    -   "Service... $120.00" is an item.
+    -   "Web Design Service $120.00" -> Item: "Web Design Service", Amount: 120.00
+    -   "Consultation 2 hrs $100.00" -> Item: "Consultation", Amount: 100.00
+    -   "Discount $50.00" -> Extract "Discount" or "Credit" lines as 'discount_amount'.
+    -   "Total $..." -> Extract the final total.
+    -   IMPORTANT: Remove dollar amounts from item_name field.
+ 
+OPTIONAL TABLE ROWS (if you have extracted rows separately):
+<<<
+{table_rows}
+>>>"""
         
-        # Output result
+        return prompt
+        
+        return prompt
+        
+        return prompt
+    
+    def extract_invoice_data(self, file_path):
+        """Main function to extract focused invoice data from image or PDF"""
+        print(f"Processing: {file_path}")
+        
+        # Extract text
+        text = self.extract_text(file_path)
+        
+        # Extract specific fields
+        result = {
+            'company_name': self.extract_company_name(text),
+            'date': self.extract_date(text),
+            'items': self.extract_table_data(text),
+            'subtotal': self.extract_subtotal(text),
+            'tax': self.extract_tax(text),
+            'discount': self.extract_discount(text),
+            'total_amount': self.extract_total_amount(text)
+        }
+
+        return result
+    
+    def display_results(self, result):
+        """Display extracted data in a clean format"""
         print("\n" + "="*50)
-        print("EXTRACTION RESULT")
+        print("EXTRACTED INVOICE DATA")
         print("="*50)
-        print(json.dumps(result, indent=2))
         
-        # Save result
-        suffix = "_llm" if mode == 'llm' else "_universal"
-        output_name = f"{os.path.splitext(os.path.basename(image_path))[0]}{suffix}.json"
-        with open(output_name, 'w') as f:
-            json.dump(result, f, indent=2)
-        print(f"\nResult saved to: {output_name}")
+        print(f"Company Name: {result.get('company_name', 'Not found')}")
+        print(f"Date: {result.get('date', 'Not found')}")
+        
+        print("\nITEMS:")
+        print("-" * 80)
+        items = result.get('items', [])
+        
+        if items:
+            print(f"{'Description':<30} {'Qty':<5} {'Unit Price':<12} {'Amount':<10}")
+            print("-" * 80)
+            for item in items:
+                desc = item['description'][:27] + "..." if len(item['description']) > 30 else item['description']
+                print(f"{desc:<30} {item['quantity']:<5} ${item['unit_price']:<11} ${item['amount']:<10}")
+        else:
+            print("No items found")
+        
+        print("\n" + "="*50)
+        print("FINANCIAL SUMMARY")
+        print("="*50)
+        
+        subtotal = result.get('subtotal', '0')
+        total_amount = result.get('total_amount', '0')
+        
+        # Only show subtotal if it's different from total
+        if subtotal != total_amount and subtotal != '0':
+            print(f"Subtotal: ${subtotal}")
+
+        if subtotal == total_amount and subtotal !=0:
+            print(f"Total: ${subtotal   }"   )
+        
+        print(f"Tax: ${result.get('tax', '0')}")
+        print(f"Discount: ${result.get('discount', '0')}")
+        print(f"Total Amount: ${total_amount}")
+        print("\n" + "="*50)
+
+# Usage example
+def main():
+    import argparse
+    import sys
+    
+    parser = argparse.ArgumentParser(description='Invoice OCR Extraction')
+    parser.add_argument('file_path', nargs='?', help='Path to invoice image or PDF')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    args = parser.parse_args()
+    
+    # Initialize OCR system
+    ocr = FocusedInvoiceOCR()
+    
+    # Determine file path
+    if args.file_path:
+        invoice_path = args.file_path
+    else:
+        # Fallback to scanning current directory for common image formats
+        potential_files = [f for f in os.listdir('.') 
+                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.pdf')) 
+                          and f.lower() != "debug_layout.py"]
+        
+        if not potential_files:
+            print("No image/PDF files provided or found in current directory.")
+            print("Usage: python invoice_ocr.py <path_to_invoice>")
+            return
+            
+        print("No file specified. Found the following potential files:")
+        for i, f in enumerate(potential_files):
+            print(f"{i+1}. {f}")
+        
+        try:
+            selection = input("\nEnter number to process (or 'q' to quit): ")
+            if selection.lower() == 'q':
+                return
+            idx = int(selection) - 1
+            if 0 <= idx < len(potential_files):
+                invoice_path = potential_files[idx]
+            else:
+                print("Invalid selection.")
+                return
+        except ValueError:
+            print("Invalid input.")
+            return
+
+    try:
+        # Use the hybrid approach
+        result = ocr.extract_invoice_data_hybrid(invoice_path)
+        
+        if result:
+            print("\nHybrid Extraction Result:")
+            print("=" * 50)
+            print(json.dumps(result, indent=2))
+            print("=" * 50)
+            
+            # Save result
+            output_name = f"{os.path.splitext(os.path.basename(invoice_path))[0]}_data.json"
+            with open(output_name, 'w') as f:
+                json.dump(result, f, indent=2)
+            print(f"\nResult saved to '{output_name}'")
+            return result
+        else:
+            print("Failed to process invoice")
+            return None
         
     except Exception as e:
-        print(f"Error processing document: {e}")
+        print(f"Error: {e}")
         import traceback
         traceback.print_exc()
 

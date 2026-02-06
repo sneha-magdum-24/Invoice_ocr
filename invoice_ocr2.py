@@ -1676,7 +1676,7 @@ class FocusedInvoiceOCR:
         return '\n'.join(cleaned_lines)
     
     def clean_table_headers(self, text):
-        """Remove obvious table headers from OCR text"""
+        """Remove obvious table headers from OCR text and fix currency symbols"""
         lines = text.split('\n')
         cleaned_lines = []
         
@@ -1685,8 +1685,23 @@ class FocusedInvoiceOCR:
             if not line:
                 continue
             
+            # Fix common OCR currency errors FIRST
+            # € (euro) often misread as 6
+            line = line.replace('6', '€')  # Replace standalone 6 with €
+            # More specific: 6 followed by numbers is likely €
+            line = re.sub(r'\b6\s*(\d+[,.]\d+)', r'€\1', line)
+            line = re.sub(r'(\d+[,.]\d+)\s*6\b', r'\1€', line)
+            
+            # Fix other common OCR errors
+            line = re.sub(r'&#\d+;', '', line)  # Remove HTML entities
+            line = line.replace('&gt;', '>').replace('&lt;', '<').replace('&quot;', '"')
+            line = line.replace('&amp;', '&')
+            
+            # Fix $ symbol errors
+            line = re.sub(r'\b8(\d{1,3}[,.]\d+)', r'$\1', line)
+            line = re.sub(r'\bS(\d)', r'$\1', line)
+            
             # Skip lines that look like table headers
-            # (short lines with common header words)
             if len(line) <= 5 and line.upper() in ['TEM', 'ITEM', 'QTY', 'COST', 'PRICE', 'DESC']:
                 continue
                 
@@ -1712,8 +1727,11 @@ class FocusedInvoiceOCR:
         
         print(f"OCR extracted {len(extracted_text)} characters")
         
-        # Step 1.2: Fix common OCR artifacts (8 -> $, S -> $)
-        # This must be done BEFORE sending to LLM
+        # Step 1.2: Fix common OCR artifacts BEFORE cleaning
+        # Fix € symbol (often misread as 6)
+        extracted_text = re.sub(r'\b6\s*(\d+[,.]\d+)', r'€\1', extracted_text)
+        extracted_text = re.sub(r'(\d+[,.]\d+)\s*6\b', r'\1€', extracted_text)
+        extracted_text = extracted_text.replace('6', '€')  # Aggressive: replace all 6 with €
         
         # Fix 8 -> $ for patterns like 82,500.00 -> $2,500.00
         extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3}[,.]\d{2})', r'$\1', extracted_text) 
@@ -1721,7 +1739,7 @@ class FocusedInvoiceOCR:
         extracted_text = re.sub(r'\b8(\d{1,3}[,.]\d{3})', r'$\1', extracted_text)
 
         # Fix S -> $
-        extracted_text = re.sub(r'\bS(\d)', r'$\1', extracted_text) # S500.00 -> $500.00
+        extracted_text = re.sub(r'\bS(\d)', r'$\1', extracted_text)
         
         # Step 1.5: Clean table headers
         cleaned_text = self.clean_table_headers(extracted_text)
@@ -1757,11 +1775,11 @@ class FocusedInvoiceOCR:
             "model": "llama3.2:latest",
             "prompt": prompt,
             "stream": False,
+            "format": "json",
             "options": {
-                "temperature": 0.1,  # Low temperature for consistent output
+                "temperature": 0.0,
                 "top_p": 0.9,
-                "num_predict": 1000,
-                "seed": random.randint(0, 100000)  # Break cache
+                "num_predict": 2000
             }
         }
         
@@ -1785,43 +1803,13 @@ class FocusedInvoiceOCR:
                     else:
                         json_str = raw_response[start_idx:end_idx]
                     
-                    # Attempt cleanup and parsing
+                    # Parse JSON directly
                     try:
-                        parsed_json = json.loads(json_str)
-                        return parsed_json
-                    except json.JSONDecodeError:
-                        # Smarter fix: Balance brackets
-                        def balance_json(s):
-                            stack = []
-                            is_escaped = False
-                            in_string = False
-                            for char in s:
-                                if is_escaped:
-                                    is_escaped = False
-                                    continue
-                                if char == '\\':
-                                    is_escaped = True
-                                    continue
-                                if char == '"':
-                                    in_string = not in_string
-                                    continue
-                                if not in_string:
-                                    if char == '{':
-                                        stack.append('}')
-                                    elif char == '[':
-                                        stack.append(']')
-                                    elif char == '}' or char == ']':
-                                        if stack and stack[-1] == char:
-                                            stack.pop()
-                            # Append missing closing brackets in reverse order
-                            return s + "".join(reversed(stack))
-                        
-                        fixed_str = balance_json(json_str.strip())
-                        try:
-                            return json.loads(fixed_str)
-                        except json.JSONDecodeError:
-                            print(f"Smart JSON fix failed on: {json_str[:50]}...")
-                            return None
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parse error: {e}")
+                        print(f"Raw JSON (first 500 chars): {json_str[:500]}")
+                        return None
                 else:
                     print("No valid JSON found in response")
                     print(f"Raw response: {raw_response}")
@@ -1846,7 +1834,15 @@ class FocusedInvoiceOCR:
            - Large text at the start (e.g. "GILLS TREE...", "RELIANT PEST...")
            - Email domains (e.g. "@gillstreeservice.com" -> "Gills Tree Service")
            - Logos text at the top left/right.
-        2. Extract valid JSON only.
+        2. DATE EXTRACTION:
+           - Look for patterns: MM/DD/YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD
+           - Common labels: "Date:", "Invoice Date:", "Dated:", "Date of Issue:"
+           - Extract the FIRST date found in the document (usually invoice date)
+           - Convert to YYYY-MM-DD format
+           - Examples: "11/3/2025" -> "2025-11-03", "Date: 11/11/25" -> "2025-11-11"
+        3. Extract valid JSON only.
+        4. Handle multiple currency symbols: $, €, £, ₹
+        5. Remove ALL currency symbols from numbers in JSON output
 Do not include markdown blocks (```json).
 Do not add comments.
 Ensure all JSON keys and values are properly quoted and valid.
@@ -1867,32 +1863,42 @@ Output must match this exact schema:
 
 STRICT RULES:
 1) Extract EVERY service line that has a price. Do not skip any.
-2) If you see multiple dollar amounts in the text, usually each one corresponds to an item.
-    - Exception: If a line has "$2500 $2500", it is ONE item of $2500.
-3) Extract CLEAN item names without any dollar amounts or prices.
-4) Use the text exactly as it appears for descriptions.
-5) "Card Processing Fee" IS an item.
-6) Trust the "Total" printed on the invoice for the 'total' field.
-5) "Discount" is NOT an item. Put it in "discount_amount". eg. "Discount $50.00" -> discount_amount: 50.00
-6) Trust the "Total" printed on the invoice for the 'total' field.
-7) EXTRACT the "Subtotal" printed on the invoice. Do NOT calculate it yourself.
-8) Ensure extracted amounts are numbers (e.g. 1500.00, not "1,500.00").
+2) DATE: Extract the first date found (usually near top). Convert to YYYY-MM-DD format.
+3) If you see multiple dollar/euro amounts in the text, usually each one corresponds to an item.
+    - Exception: If a line has "$2500 $2500" or "€2500 €2500", it is ONE item.
+4) Extract CLEAN item names without any dollar/euro amounts or prices.
+5) Use the text exactly as it appears for descriptions.
+6) DO NOT invent items. Only extract items that are explicitly listed in the invoice.
+7) "PAYMENT AMOUNT DUE", "Total", "Subtotal" are NOT items - they are summary amounts.
+8) Trust the "Total" or "PAYMENT AMOUNT DUE" printed on the invoice for the 'total' field.
+9) EXTRACT the "Subtotal" printed on the invoice. Do NOT calculate it yourself.
+10) Ensure extracted amounts are NUMBERS ONLY (e.g. 1500.00, not "€1,500.00" or "$1,500.00").
+11) "Discount" is NOT an item. Put it in "discount_amount".
+12) Remove currency symbols (€, $, £, ₹) from all numeric values.
+13) Date format must be YYYY-MM-DD (e.g. "2025-11-03" not "11/3/2025").
+14) If quantity and unit_price are not shown, set quantity=1 and unit_price=amount.
 
-For items:
-- Focus on main service lines that have clear dollar amounts
-- Look for patterns like: [Service Description] followed by [Dollar Amount]
-- Ignore material lists and supply details
-- Only include services where the amount makes sense with the subtotal
-- Extract ONLY the service/item description text, removing any dollar amounts
-- Clean item names should not contain prices, quantities, or dollar signs
-- Example: "Web Design Service $500.00" -> item_name: "Web Design Service"
-- Example: "Consultation 2 hrs $150.00" -> item_name: "Consultation"
-- Focus on the descriptive text before any numbers or dollar amounts
+For items - CRITICAL EXTRACTION RULES:
+- Look for table rows with: Date | Vehicle/Service | Amount pattern
+- ONLY extract items from the "SERVICES PROVIDED" section or similar table
+- DO NOT extract "PAYMENT AMOUNT DUE", "Total", "Subtotal" as items
+- Extract quantity from text (e.g. "2x", "qty 3", or standalone numbers before description)
+- If quantity not found, default to 1
+- Extract unit_price: If you see "2x €100 = €200", unit_price=100, quantity=2, amount=200
+- If only amount shown (e.g. "Service €225"), set unit_price=amount, quantity=1
+- Extract amount (the final price for that line item)
+- Clean item names: Remove ALL numbers, currency symbols, dates, vehicle IDs
+- Examples:
+  * "11/3/2025 Blue Chevy 1500 Interior €225" -> item_name="Blue Chevy 1500 Interior", quantity=1, unit_price=225, amount=225
+  * "11/10/2025 BB5483A 2015 Black Chevy Suburban LTZ 157874 Engine Bay €10" -> item_name="2015 Black Chevy Suburban LTZ Engine Bay", quantity=1, unit_price=10, amount=10
+  * "PAYMENT AMOUNT DUE $910" -> This is the TOTAL, NOT an item
 
 For totals:
-- Find "Subtotal" and extract that exact amount
-- Find "Total" and extract that exact amount
+- "PAYMENT AMOUNT DUE" is the TOTAL amount eg. "PAYMENT AMOUNT DUE $910" -> total=910
+- Find "Subtotal" or sum of all item amounts for subtotal
+- Find "Total" or "PAYMENT AMOUNT DUE" for total
 - Verify that item amounts add up to subtotal
+- DO NOT include "PAYMENT AMOUNT DUE" as an item
 
 INVOICE TEXT (OCR extracted):
 <<<
